@@ -1,0 +1,17 @@
+*.md
+.git
+.gitignore
+.env
+.env.example
+docker-compose.yml
+data/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/

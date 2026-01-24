@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  wishlist:
+    build: .
+    container_name: wishlist-manager
+    restart: unless-stopped
+
+    ports:
+      - "5000:5000"
+
+    volumes:
+      - ./data:/data
+
+    environment:
+      # === VERPLICHT: Spotweb configuratie ===
+      - SPOTWEB_BASE_URL=http://your-spotweb-url
+      - SPOTWEB_APIKEY=your-spotweb-api-key
+
+      # === VERPLICHT: SABnzbd configuratie ===
+      - SAB_BASE_URL=http://your-sabnzbd-url:8080
+      - SAB_APIKEY=your-sabnzbd-api-key
+
+      # === OPTIONEEL: SABnzbd categorie ===
+      - SAB_CATEGORY=books
+      - SPOTWEB_CAT=7020
+
+      # === OPTIONEEL: Web UI credentials ===
+      - WEB_USERNAME=admin
+      - WEB_PASSWORD=wishlist
+      - SECRET_KEY=change-this-to-random-string
+
+      # === OPTIONEEL: Email monitoring (Gmail) ===
+      # Laat leeg om email monitoring uit te schakelen
+      - EMAIL_ADDRESS=
+      - EMAIL_PASSWORD=
+      - EMAIL_IMAP_SERVER=imap.gmail.com
+      - EMAIL_IMAP_PORT=993
+      - EMAIL_CHECK_INTERVAL=300
+
+      # Optioneel: whitelist van toegestane email senders (comma separated)
+      # Laat leeg om alle senders toe te staan
+      - EMAIL_ALLOWED_SENDERS=
+
+      # === OPTIONEEL: Worker interval ===
+      - INTERVAL_SECONDS=900
+
+      # === OPTIONEEL: Database pad ===
+      - DB_PATH=/data/wishlist.db
+
+      # === OPTIONEEL: Flask configuratie ===
+      - FLASK_HOST=0.0.0.0
+      - FLASK_PORT=5000
+      - FLASK_DEBUG=false
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

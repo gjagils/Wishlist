@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wishlist Manager</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>📚 Wishlist Manager</h1>
+            <div class="header-stats">
+                <span class="stat" id="stat-total">Totaal: <strong>0</strong></span>
+                <span class="stat stat-pending" id="stat-pending">Pending: <strong>0</strong></span>
+                <span class="stat stat-searching" id="stat-searching">Zoeken: <strong>0</strong></span>
+                <span class="stat stat-found" id="stat-found">Gevonden: <strong>0</strong></span>
+                <span class="stat stat-failed" id="stat-failed">Mislukt: <strong>0</strong></span>
+            </div>
+        </header>
+
+        <!-- Add Item Form -->
+        <div class="card add-form">
+            <h2>Item Toevoegen</h2>
+            <form id="add-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="author">Auteur(s)</label>
+                        <input type="text" id="author" placeholder="bijv. Horst Fjell" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="title">Titel</label>
+                        <input type="text" id="title" placeholder="bijv. De schreeuw" required>
+                    </div>
+                    <div class="form-group form-submit">
+                        <button type="submit" class="btn btn-primary">Toevoegen</button>
+                    </div>
+                </div>
+            </form>
+            <div id="add-message" class="message"></div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters">
+            <button class="filter-btn active" data-status="all">Alle</button>
+            <button class="filter-btn" data-status="pending">Pending</button>
+            <button class="filter-btn" data-status="searching">Zoeken</button>
+            <button class="filter-btn" data-status="found">Gevonden</button>
+            <button class="filter-btn" data-status="failed">Mislukt</button>
+        </div>
+
+        <!-- Wishlist Items -->
+        <div class="card">
+            <h2>Wishlist Items</h2>
+            <div id="loading" class="loading">Laden...</div>
+            <div id="wishlist-container"></div>
+        </div>
+
+        <!-- Recent Logs -->
+        <div class="card">
+            <h2>Recente Activiteit</h2>
+            <div id="logs-container"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
