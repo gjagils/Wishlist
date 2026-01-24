@@ -62,10 +62,13 @@ async function loadLogs() {
 
 async function handleAddItem(e) {
     e.preventDefault();
+    console.log('Form submitted!'); // DEBUG
 
     const author = document.getElementById('author').value.trim();
     const title = document.getElementById('title').value.trim();
     const messageEl = document.getElementById('add-message');
+
+    console.log('Author:', author, 'Title:', title); // DEBUG
 
     if (!author || !title) {
         showMessage(messageEl, 'Vul beide velden in', 'error');
@@ -73,13 +76,18 @@ async function handleAddItem(e) {
     }
 
     try {
+        console.log('Sending POST request...'); // DEBUG
         const response = await fetch('/api/wishlist', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ author, title })
+            body: JSON.stringify({ author, title }),
+            credentials: 'include'  // Zorg dat auth cookies worden meegestuurd
         });
 
+        console.log('Response status:', response.status); // DEBUG
+
         const data = await response.json();
+        console.log('Response data:', data); // DEBUG
 
         if (response.ok) {
             showMessage(messageEl, `✓ ${author} - "${title}" toegevoegd!`, 'success');
@@ -90,6 +98,7 @@ async function handleAddItem(e) {
             showMessage(messageEl, data.error || 'Toevoegen mislukt', 'error');
         }
     } catch (error) {
+        console.error('Fetch error:', error); // DEBUG
         showMessage(messageEl, 'Netwerkfout: ' + error.message, 'error');
     }
 }
