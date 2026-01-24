@@ -205,6 +205,56 @@ def api_health():
     })
 
 
+@app.route('/api/update', methods=['POST'])
+@requires_auth
+def api_update():
+    """Update applicatie code via git pull."""
+    import subprocess
+
+    try:
+        # Check of we in een git repository zitten
+        result = subprocess.run(
+            ['git', 'rev-parse', '--git-dir'],
+            cwd='/app',
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode != 0:
+            return jsonify({
+                'error': 'Geen git repository gevonden in /app',
+                'hint': 'Code is waarschijnlijk handmatig geüpload'
+            }), 400
+
+        # Git pull uitvoeren
+        result = subprocess.run(
+            ['git', 'pull', 'origin', 'claude/wishlist-web-interface-80kID'],
+            cwd='/app',
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+
+        if result.returncode == 0:
+            db.add_log(None, 'info', f'Code update: {result.stdout.strip()}')
+            return jsonify({
+                'message': 'Update succesvol',
+                'output': result.stdout,
+                'restart_required': True
+            }), 200
+        else:
+            return jsonify({
+                'error': 'Git pull mislukt',
+                'output': result.stderr
+            }), 500
+
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Git pull timeout'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ===== STARTUP =====
 
 def initialize():

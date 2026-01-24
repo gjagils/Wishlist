@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  wishlist:
+    image: python:3.12-slim
+    container_name: wishlist
+    restart: unless-stopped
+
+    ports:
+      - "6754:5000"
+
+    volumes:
+      - /volume1/docker/wishlist/app:/app
+      - /volume1/docker/wishlist/data:/data
+
+    working_dir: /app
+
+    # Met git support voor updates
+    command: >
+      sh -c "
+      apt-get update -qq &&
+      apt-get install -y -qq git &&
+      chmod -R 777 /data &&
+      pip install --no-cache-dir -r requirements.txt &&
+      python run_all.py
+      "
+
+    environment:
+      # Spotweb
+      SPOTWEB_BASE_URL: "http://192.168.68.120:8085"
+      SPOTWEB_APIKEY: "ac596cb2d0145e3940f82eb20668974b"
+      SPOTWEB_CAT: "7020"
+
+      # SABnzbd
+      SAB_BASE_URL: "http://192.168.68.120:8080/sabnzbd"
+      SAB_APIKEY: "23025e3efd9843e295358ff2b92b606a"
+      SAB_CATEGORY: "wishlist"
+
+      # Worker
+      INTERVAL_SECONDS: "3600"
+
+      # Web UI
+      WEB_USERNAME: "admin"
+      WEB_PASSWORD: "wishlist"
+      SECRET_KEY: "wijzig-naar-random-string"
+
+      # Database
+      DB_PATH: "/data/wishlist.db"
+      WISHLIST_FILE: "/data/wishlist.txt"
+
+      # Flask
+      FLASK_HOST: "0.0.0.0"
+      FLASK_PORT: "5000"
+      FLASK_DEBUG: "false"
+      PYTHONUNBUFFERED: "1"
+
+      # Email (optioneel)
+      EMAIL_ADDRESS: ""
+      EMAIL_PASSWORD: ""
+      EMAIL_IMAP_SERVER: "imap.gmail.com"
+      EMAIL_IMAP_PORT: "993"
+      EMAIL_CHECK_INTERVAL: "300"
+      EMAIL_ALLOWED_SENDERS: ""

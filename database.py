@@ -15,8 +15,15 @@ DB_PATH = os.environ.get("DB_PATH", "/data/wishlist.db")
 @contextmanager
 def get_db():
     """Context manager voor database connectie."""
-    conn = sqlite3.connect(DB_PATH)
+    # Gebruik timeout van 30 seconden voor locked database
+    # en enable WAL mode voor betere concurrent access
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+
+    # Enable Write-Ahead Logging voor betere concurrency
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=30000")  # 30 seconden
+
     try:
         yield conn
         conn.commit()
@@ -29,6 +36,16 @@ def get_db():
 
 def init_db() -> None:
     """Initialiseer database schema."""
+    # Zorg dat data directory bestaat met juiste permissions
+    data_dir = os.path.dirname(DB_PATH)
+    os.makedirs(data_dir, exist_ok=True)
+
+    # Set permissions op data directory
+    try:
+        os.chmod(data_dir, 0o777)
+    except Exception as e:
+        print(f"Waarschuwing: Kon permissions niet zetten op {data_dir}: {e}")
+
     with get_db() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS wishlist (
@@ -62,6 +79,18 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_logs_wishlist ON logs(wishlist_id);
             CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
         """)
+
+    # Set permissions op database file en WAL files
+    try:
+        if os.path.exists(DB_PATH):
+            os.chmod(DB_PATH, 0o666)
+        if os.path.exists(DB_PATH + "-wal"):
+            os.chmod(DB_PATH + "-wal", 0o666)
+        if os.path.exists(DB_PATH + "-shm"):
+            os.chmod(DB_PATH + "-shm", 0o666)
+    except Exception as e:
+        print(f"Waarschuwing: Kon permissions niet zetten op database files: {e}")
+
     print(f"Database geïnitialiseerd: {DB_PATH}")
 
 
