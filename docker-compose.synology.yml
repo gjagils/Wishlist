@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  wishlist:
+    build: /volume1/docker/wishlist/app
+    container_name: wishlist
+    restart: unless-stopped
+
+    ports:
+      - "5000:5000"
+
+    volumes:
+      - /volume1/docker/wishlist/data:/data
+
+    environment:
+      # Spotweb (bestaand)
+      SPOTWEB_BASE_URL: "http://192.168.68.120:8085"
+      SPOTWEB_APIKEY: "ac596cb2d0145e3940f82eb20668974b"
+      SPOTWEB_CAT: "7020"
+
+      # SABnzbd (bestaand)
+      SAB_BASE_URL: "http://192.168.68.120:8080/sabnzbd"
+      SAB_APIKEY: "23025e3efd9843e295358ff2b92b606a"
+      SAB_CATEGORY: "wishlist"
+
+      # Worker interval (bestaand)
+      INTERVAL_SECONDS: "3600"
+
+      # NIEUW: Web UI authenticatie
+      WEB_USERNAME: "admin"
+      WEB_PASSWORD: "wishlist"  # ⚠️ Verander dit!
+      SECRET_KEY: "wijzig-naar-random-string"
+
+      # NIEUW: Database
+      DB_PATH: "/data/wishlist.db"
+      WISHLIST_FILE: "/data/wishlist.txt"
+
+      # NIEUW: Flask configuratie
+      FLASK_HOST: "0.0.0.0"
+      FLASK_PORT: "5000"
+      FLASK_DEBUG: "false"
+
+      # OPTIONEEL: Gmail integratie (laat leeg als je het niet gebruikt)
+      EMAIL_ADDRESS: ""
+      EMAIL_PASSWORD: ""
+      EMAIL_IMAP_SERVER: "imap.gmail.com"
+      EMAIL_IMAP_PORT: "993"
+      EMAIL_CHECK_INTERVAL: "300"
+      EMAIL_ALLOWED_SENDERS: ""
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
