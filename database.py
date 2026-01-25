@@ -15,23 +15,51 @@ DB_PATH = os.environ.get("DB_PATH", "/data/wishlist.db")
 @contextmanager
 def get_db():
     """Context manager voor database connectie."""
-    # Gebruik timeout van 30 seconden voor locked database
-    # en enable WAL mode voor betere concurrent access
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
-    conn.row_factory = sqlite3.Row
+    import sys
 
-    # Enable Write-Ahead Logging voor betere concurrency
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")  # 30 seconden
+    print(f"[DB DEBUG] Opening connection to {DB_PATH}", file=sys.stderr)
+    print(f"[DB DEBUG] Timeout: 30.0s", file=sys.stderr)
 
     try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
+        # Gebruik timeout van 30 seconden voor locked database
+        conn = sqlite3.connect(DB_PATH, timeout=30.0, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+
+        print(f"[DB DEBUG] Connection opened successfully", file=sys.stderr)
+
+        # Enable Write-Ahead Logging voor betere concurrency
+        result = conn.execute("PRAGMA journal_mode=WAL").fetchone()
+        print(f"[DB DEBUG] PRAGMA journal_mode=WAL result: {result[0] if result else 'None'}", file=sys.stderr)
+
+        result = conn.execute("PRAGMA busy_timeout=30000").fetchone()
+        print(f"[DB DEBUG] PRAGMA busy_timeout=30000 result: {result}", file=sys.stderr)
+
+        # Check current settings
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()
+        print(f"[DB DEBUG] Current journal_mode: {journal_mode[0] if journal_mode else 'None'}", file=sys.stderr)
+
+        try:
+            yield conn
+            conn.commit()
+            print(f"[DB DEBUG] Transaction committed successfully", file=sys.stderr)
+        except sqlite3.OperationalError as e:
+            print(f"[DB ERROR] SQLite OperationalError: {e}", file=sys.stderr)
+            print(f"[DB ERROR] Database path: {DB_PATH}", file=sys.stderr)
+            conn.rollback()
+            raise
+        except Exception as e:
+            print(f"[DB ERROR] Unexpected error: {type(e).__name__}: {e}", file=sys.stderr)
+            conn.rollback()
+            raise
+    except sqlite3.OperationalError as e:
+        print(f"[DB ERROR] Cannot connect to database: {e}", file=sys.stderr)
         raise
     finally:
-        conn.close()
+        try:
+            conn.close()
+            print(f"[DB DEBUG] Connection closed", file=sys.stderr)
+        except:
+            pass
 
 
 def init_db() -> None:
@@ -150,9 +178,13 @@ def migrate_from_txt(txt_path: str) -> int:
 
 def add_wishlist_item(author: str, title: str, added_via: str = "web") -> int:
     """Voeg nieuw item toe aan wishlist."""
+    import sys
+    print(f"[DB DEBUG] add_wishlist_item called: {author} - {title}", file=sys.stderr)
+
     raw_line = f'{author} - "{title}"'
 
     with get_db() as conn:
+        print(f"[DB DEBUG] Checking for duplicates...", file=sys.stderr)
         # Check duplicaat
         existing = conn.execute(
             "SELECT id FROM wishlist WHERE author = ? AND title = ?",
@@ -160,16 +192,27 @@ def add_wishlist_item(author: str, title: str, added_via: str = "web") -> int:
         ).fetchone()
 
         if existing:
+            print(f"[DB DEBUG] Duplicate found: {existing['id']}", file=sys.stderr)
             raise ValueError(f"Item bestaat al: {raw_line}")
 
+        print(f"[DB DEBUG] Inserting new item...", file=sys.stderr)
         cursor = conn.execute(
             """INSERT INTO wishlist (author, title, raw_line, added_via)
                VALUES (?, ?, ?, ?)""",
             (author, title, raw_line, added_via)
         )
         item_id = cursor.lastrowid
+        print(f"[DB DEBUG] Item inserted with id: {item_id}", file=sys.stderr)
 
-        add_log(item_id, "info", f"Item toegevoegd via {added_via}")
+        # BELANGRIJK: Gebruik dezelfde connectie voor log!
+        print(f"[DB DEBUG] Adding log entry...", file=sys.stderr)
+        conn.execute(
+            """INSERT INTO logs (wishlist_id, level, message)
+               VALUES (?, ?, ?)""",
+            (item_id, "info", f"Item toegevoegd via {added_via}")
+        )
+        print(f"[DB DEBUG] Log entry added", file=sys.stderr)
+
         return item_id
 
 
@@ -206,9 +249,13 @@ def update_wishlist_status(
     error_message: Optional[str] = None
 ) -> None:
     """Update status van wishlist item."""
+    import sys
+    print(f"[DB DEBUG] update_wishlist_status called for item {item_id}: {status}", file=sys.stderr)
+
     with get_db() as conn:
         now = datetime.now().isoformat()
 
+        print(f"[DB DEBUG] Updating wishlist status...", file=sys.stderr)
         conn.execute(
             """UPDATE wishlist
                SET status = ?, last_search = ?, nzb_url = ?, error_message = ?
@@ -219,7 +266,15 @@ def update_wishlist_status(
         log_msg = f"Status: {status}"
         if error_message:
             log_msg += f" - {error_message}"
-        add_log(item_id, "info", log_msg)
+
+        # BELANGRIJK: Gebruik dezelfde connectie voor log!
+        print(f"[DB DEBUG] Adding log entry...", file=sys.stderr)
+        conn.execute(
+            """INSERT INTO logs (wishlist_id, level, message)
+               VALUES (?, ?, ?)""",
+            (item_id, "info", log_msg)
+        )
+        print(f"[DB DEBUG] Status update complete", file=sys.stderr)
 
 
 def delete_wishlist_item(item_id: int) -> bool:
@@ -243,12 +298,16 @@ def add_log(
     message: str
 ) -> None:
     """Voeg log entry toe."""
+    import sys
+    print(f"[DB DEBUG] add_log called: wishlist_id={wishlist_id}, level={level}", file=sys.stderr)
+
     with get_db() as conn:
         conn.execute(
             """INSERT INTO logs (wishlist_id, level, message)
                VALUES (?, ?, ?)""",
             (wishlist_id, level, message)
         )
+        print(f"[DB DEBUG] Log entry added successfully", file=sys.stderr)
 
 
 def get_logs(
