@@ -120,9 +120,12 @@ def spotweb_search(author: str, title: str) -> Optional[str]:
     Returns: NZB URL als gevonden, anders None
     """
     parser = etree.XMLParser(recover=True)
+    search_attempts = 0
+    total_results = 0
 
     for query in search_variants(author, title):
-        db.add_log(None, "info", f"Zoeken in Spotweb: {query}")
+        search_attempts += 1
+        print(f"   Zoekpoging {search_attempts}: '{query}'")
 
         params = {
             "apikey": SPOTWEB_APIKEY,
@@ -143,10 +146,16 @@ def spotweb_search(author: str, title: str) -> Optional[str]:
             channel = root.find("channel")
 
             if channel is None:
+                print(f"   → Geen resultaten")
                 continue
 
+            results = channel.findall("item")
+            result_count = len(results)
+            total_results += result_count
+            print(f"   → {result_count} resultaten gevonden")
+
             # Check alle resultaten
-            for item in channel.findall("item"):
+            for item in results:
                 title_el = item.find("title")
                 if title_el is None:
                     continue
@@ -158,20 +167,17 @@ def spotweb_search(author: str, title: str) -> Optional[str]:
                     enc = item.find("enclosure")
                     if enc is not None and "url" in enc.attrib:
                         nzb_url = enc.attrib["url"]
-                        db.add_log(
-                            None,
-                            "info",
-                            f"✓ Match gevonden: {candidate_title[:80]}"
-                        )
+                        print(f"   ✓ MATCH: {candidate_title[:80]}")
                         return nzb_url
 
         except requests.RequestException as e:
-            db.add_log(None, "error", f"Spotweb fout: {e}")
+            print(f"   ✗ Spotweb fout: {e}")
             continue
         except Exception as e:
-            db.add_log(None, "error", f"Parse fout: {e}")
+            print(f"   ✗ Parse fout: {e}")
             continue
 
+    print(f"   ✗ Niet gevonden ({search_attempts} zoekopdrachten, {total_results} resultaten)")
     return None
 
 
