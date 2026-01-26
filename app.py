@@ -51,6 +51,12 @@ def index():
     return send_from_directory('static', 'index.html')
 
 
+@app.route('/portal')
+def portal():
+    """Portaal pagina met links naar alle apps (geen auth vereist)."""
+    return send_from_directory('static', 'portal.html')
+
+
 @app.route('/static/<path:path>')
 def serve_static(path):
     """Serveer statische bestanden."""
