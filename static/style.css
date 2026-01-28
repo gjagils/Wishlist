@@ -204,6 +204,7 @@ body {
     gap: 10px;
     margin-bottom: 20px;
     flex-wrap: wrap;
+    align-items: center;
 }
 
 .filter-btn {
@@ -228,6 +229,12 @@ body {
     color: white;
 }
 
+.delete-all-found {
+    margin-left: auto;
+    padding: 10px 20px;
+    font-size: 0.9rem;
+}
+
 /* Wishlist Items */
 .wishlist-item {
     border: 1px solid var(--border-color);
@@ -241,6 +248,28 @@ body {
 .wishlist-item:hover {
     box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     transform: translateY(-2px);
+}
+
+.items-separator {
+    margin: 30px 0;
+    padding: 12px 20px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    background: linear-gradient(to right, transparent, var(--border-color) 20%, var(--border-color) 80%, transparent);
+    position: relative;
+}
+
+.items-separator::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    background: var(--border-color);
+    z-index: -1;
 }
 
 .item-header {

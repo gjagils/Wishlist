@@ -260,6 +260,25 @@ def delete_wishlist_item(item_id: int) -> bool:
         return deleted
 
 
+def bulk_delete_by_status(status: str) -> int:
+    """Verwijder alle items met een specifieke status."""
+    with get_db() as conn:
+        # Haal eerst alle IDs op
+        cursor = conn.execute("SELECT id FROM wishlist WHERE status = ?", (status,))
+        item_ids = [row[0] for row in cursor.fetchall()]
+
+        if not item_ids:
+            return 0
+
+        # Verwijder logs voor deze items
+        placeholders = ','.join('?' * len(item_ids))
+        conn.execute(f"DELETE FROM logs WHERE wishlist_id IN ({placeholders})", item_ids)
+
+        # Verwijder de items zelf
+        cursor = conn.execute("DELETE FROM wishlist WHERE status = ?", (status,))
+        return cursor.rowcount
+
+
 # ===== LOGS =====
 
 def add_log(

@@ -124,6 +124,40 @@ async function deleteItem(itemId, title) {
     }
 }
 
+async function deleteAllFound() {
+    const foundItems = wishlistData.items.filter(item => item.status === 'found');
+
+    if (foundItems.length === 0) {
+        alert('Geen gevonden items om te verwijderen');
+        return;
+    }
+
+    if (!confirm(`Weet je zeker dat je alle ${foundItems.length} gevonden item(s) wilt verwijderen?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/wishlist/bulk-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'found' }),
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            alert(`✓ ${data.deleted} item(s) verwijderd`);
+            loadWishlist();
+            loadLogs();
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Verwijderen mislukt');
+        }
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+    }
+}
+
 // ===== RENDER FUNCTIONS =====
 function updateStats(stats) {
     document.getElementById('stat-total').innerHTML = `Totaal: <strong>${stats.total}</strong>`;
@@ -152,7 +186,11 @@ function renderWishlist() {
         return;
     }
 
-    container.innerHTML = items.map(item => `
+    // Sorteer items: niet-gevonden eerst, dan gevonden
+    const unfoundItems = items.filter(item => item.status !== 'found');
+    const foundItems = items.filter(item => item.status === 'found');
+
+    const renderItem = (item) => `
         <div class="wishlist-item">
             <div class="item-header">
                 <div class="item-title">
@@ -173,7 +211,26 @@ function renderWishlist() {
                 ${item.error_message ? `<span style="color: var(--danger-color)">⚠️ ${escapeHtml(item.error_message)}</span>` : ''}
             </div>
         </div>
-    `).join('');
+    `;
+
+    let html = '';
+
+    // Render niet-gevonden items
+    if (unfoundItems.length > 0) {
+        html += unfoundItems.map(renderItem).join('');
+    }
+
+    // Voeg scheidingslijn toe als er beide categorieën zijn
+    if (unfoundItems.length > 0 && foundItems.length > 0) {
+        html += '<div class="items-separator">Gevonden</div>';
+    }
+
+    // Render gevonden items
+    if (foundItems.length > 0) {
+        html += foundItems.map(renderItem).join('');
+    }
+
+    container.innerHTML = html;
 }
 
 function renderLogs(logs) {

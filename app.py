@@ -160,6 +160,32 @@ def api_delete_wishlist(item_id: int):
         return jsonify({'error': 'Item niet gevonden'}), 404
 
 
+@app.route('/api/wishlist/bulk-delete', methods=['POST'])
+@requires_auth
+def api_bulk_delete_wishlist():
+    """Verwijder alle items met een specifieke status."""
+    data = request.get_json()
+
+    if not data or 'status' not in data:
+        return jsonify({'error': 'Status is verplicht'}), 400
+
+    status = data['status']
+
+    # Valideer status
+    valid_statuses = ['pending', 'searching', 'found', 'failed']
+    if status not in valid_statuses:
+        return jsonify({'error': f'Ongeldige status. Gebruik: {", ".join(valid_statuses)}'}), 400
+
+    try:
+        deleted_count = db.bulk_delete_by_status(status)
+        return jsonify({
+            'message': f'{deleted_count} item(s) verwijderd',
+            'deleted': deleted_count
+        }), 200
+    except Exception as e:
+        return jsonify({'error': f'Server fout: {str(e)}'}), 500
+
+
 @app.route('/api/wishlist/<int:item_id>/status', methods=['PUT'])
 @requires_auth
 def api_update_status(item_id: int):
