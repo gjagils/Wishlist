@@ -48,19 +48,30 @@ def requires_auth(f):
 @requires_auth
 def index():
     """Hoofdpagina met web interface."""
-    return send_from_directory('static', 'index.html')
+    response = send_from_directory('static', 'index.html')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/portal')
 def portal():
     """Portaal pagina met links naar alle apps (geen auth vereist)."""
-    return send_from_directory('static', 'portal.html')
+    response = send_from_directory('static', 'portal.html')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 @app.route('/static/<path:path>')
 def serve_static(path):
     """Serveer statische bestanden."""
-    return send_from_directory('static', path)
+    response = send_from_directory('static', path)
+    # Cache static files for 1 hour, but allow revalidation
+    response.headers['Cache-Control'] = 'public, max-age=3600, must-revalidate'
+    return response
 
 
 # ===== API ENDPOINTS =====

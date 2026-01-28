@@ -9,8 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY *.py .
 COPY static ./static
 
-# Create data directory
-RUN mkdir -p /data
+# Create data and logs directories
+RUN mkdir -p /data /app/logs
 
 # Expose web port
 EXPOSE 5000
