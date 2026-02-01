@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boeken Portaal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: white;
+            font-size: 2.5rem;
+            margin-bottom: 50px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .apps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+        }
+
+        .app-card {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: all 0.3s;
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .app-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        }
+
+        .app-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .app-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .app-description {
+            color: #666;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .calibre-card {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+            color: white;
+        }
+
+        .calibre-card .app-title,
+        .calibre-card .app-description {
+            color: white;
+        }
+
+        .wishlist-card {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+        }
+
+        .wishlist-card .app-title,
+        .wishlist-card .app-description {
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2rem;
+                margin-bottom: 30px;
+            }
+
+            .app-card {
+                padding: 30px;
+            }
+
+            .app-icon {
+                font-size: 3rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 Boeken Portaal van Gerd-Jan</h1>
+
+        <div class="apps">
+            <a href="http://boekjes.gerdjan.nl" class="app-card calibre-card">
+                <div class="app-icon">📖</div>
+                <div class="app-title">Bibliotheek</div>
+                <div class="app-description">
+                    Bekijk en beheer je boekenbibliotheek. Download ebooks en zoek door je collectie.
+                </div>
+            </a>
+
+            <a href="http://boekjes.gerdjan.nl:6754" class="app-card wishlist-card">
+                <div class="app-icon">⭐</div>
+                <div class="app-title">Wishlist</div>
+                <div class="app-description">
+                    Voeg nieuwe boeken toe aan je wishlist. Automatisch zoeken en downloaden via Spotweb.
+                </div>
+            </a>
+        </div>
+    </div>
+</body>
+</html>

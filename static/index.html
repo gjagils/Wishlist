@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wishlist: Boekjes van Gerd-Jan</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='20' y='15' width='60' height='70' rx='3' fill='%233498db'/%3E%3Crect x='25' y='20' width='50' height='60' fill='%23fff'/%3E%3Cline x1='35' y1='30' x2='65' y2='30' stroke='%233498db' stroke-width='2'/%3E%3Cline x1='35' y1='40' x2='65' y2='40' stroke='%233498db' stroke-width='2'/%3E%3Cline x1='35' y1='50' x2='65' y2='50' stroke='%233498db' stroke-width='2'/%3E%3Cline x1='35' y1='60' x2='55' y2='60' stroke='%233498db' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-title">
+                <h1>📚 Wishlist: Boekjes van Gerd-Jan</h1>
+                <a href="http://boekjes.gerdjan.nl" class="nav-link" target="_blank">← Terug naar Bibliotheek</a>
+            </div>
+            <div class="header-stats">
+                <span class="stat" id="stat-total">Totaal: <strong>0</strong></span>
+                <span class="stat stat-pending" id="stat-pending">Pending: <strong>0</strong></span>
+                <span class="stat stat-searching" id="stat-searching">Zoeken: <strong>0</strong></span>
+                <span class="stat stat-found" id="stat-found">Gevonden: <strong>0</strong></span>
+                <span class="stat stat-failed" id="stat-failed">Mislukt: <strong>0</strong></span>
+            </div>
+        </header>
+
+        <!-- Add Item Form -->
+        <div class="card add-form">
+            <h2>Item Toevoegen</h2>
+            <form id="add-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="author">Auteur(s)</label>
+                        <input type="text" id="author" placeholder="bijv. Horst Fjell" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="title">Titel</label>
+                        <input type="text" id="title" placeholder="bijv. De schreeuw" required>
+                    </div>
+                    <div class="form-group form-submit">
+                        <button type="submit" class="btn btn-primary">Toevoegen</button>
+                    </div>
+                </div>
+            </form>
+            <div id="add-message" class="message"></div>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters">
+            <button class="filter-btn active" data-status="all">Alle</button>
+            <button class="filter-btn" data-status="pending">Pending</button>
+            <button class="filter-btn" data-status="searching">Zoeken</button>
+            <button class="filter-btn" data-status="found">Gevonden</button>
+            <button class="filter-btn" data-status="failed">Mislukt</button>
+            <button class="btn btn-danger delete-all-found" onclick="deleteAllFound()">
+                🗑️ Verwijder alle gevonden
+            </button>
+        </div>
+
+        <!-- Wishlist Items -->
+        <div class="card">
+            <h2>Wishlist Items</h2>
+            <div id="loading" class="loading">Laden...</div>
+            <div id="wishlist-container"></div>
+        </div>
+
+        <!-- Recent Logs -->
+        <div class="card">
+            <h2>Recente Activiteit</h2>
+            <div id="logs-container"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
