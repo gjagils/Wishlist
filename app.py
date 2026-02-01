@@ -5,6 +5,7 @@ Biedt web UI en REST API met basic authentication.
 """
 import os
 import re
+import threading
 from functools import wraps
 from flask import Flask, request, jsonify, render_template_string, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -198,6 +199,48 @@ def api_retry_search(item_id: int):
     db.add_log(item_id, 'info', 'Handmatig opnieuw zoeken gestart')
 
     return jsonify({'message': 'Zoekactie opnieuw gestart'}), 200
+
+
+# Lock om te voorkomen dat meerdere zoekacties tegelijk draaien
+_search_lock = threading.Lock()
+_search_running = False
+
+
+def _run_search_now():
+    """Draai zoekactie voor alle pending items in achtergrondthread."""
+    global _search_running
+    try:
+        from worker import process_item
+        pending = db.get_wishlist_items(status='pending')
+        db.add_log(None, 'info', f'Handmatige zoekactie gestart voor {len(pending)} item(s)')
+        for item in pending:
+            process_item(item)
+    except Exception as e:
+        db.add_log(None, 'error', f'Handmatige zoekactie fout: {e}')
+    finally:
+        _search_running = False
+
+
+@app.route('/api/search/start', methods=['POST'])
+@requires_auth
+def api_start_search():
+    """Start direct een zoekactie voor alle pending items."""
+    global _search_running
+
+    if _search_running:
+        return jsonify({'error': 'Er draait al een zoekactie'}), 409
+
+    pending = db.get_wishlist_items(status='pending')
+    if not pending:
+        return jsonify({'error': 'Geen pending items om te zoeken'}), 404
+
+    _search_running = True
+    thread = threading.Thread(target=_run_search_now, daemon=True)
+    thread.start()
+
+    return jsonify({
+        'message': f'Zoekactie gestart voor {len(pending)} item(s)'
+    }), 202
 
 
 @app.route('/api/wishlist/<int:item_id>/status', methods=['PUT'])

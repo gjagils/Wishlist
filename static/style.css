@@ -209,6 +209,23 @@ body {
     background: #2980b9;
 }
 
+.btn-search {
+    background: var(--success-color);
+    color: white;
+    padding: 10px 20px;
+    font-size: 0.9rem;
+    margin-left: auto;
+}
+
+.btn-search:hover {
+    background: #219a52;
+}
+
+.btn-search:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 /* Filters */
 .filters {
     display: flex;
@@ -241,7 +258,7 @@ body {
 }
 
 .delete-all-found {
-    margin-left: auto;
+    margin-left: 0;
     padding: 10px 20px;
     font-size: 0.9rem;
 }
