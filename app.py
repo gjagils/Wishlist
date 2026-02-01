@@ -186,6 +186,20 @@ def api_bulk_delete_wishlist():
         return jsonify({'error': f'Server fout: {str(e)}'}), 500
 
 
+@app.route('/api/wishlist/<int:item_id>/retry', methods=['POST'])
+@requires_auth
+def api_retry_search(item_id: int):
+    """Zet item terug naar pending zodat worker opnieuw zoekt."""
+    item = db.get_wishlist_item(item_id)
+    if not item:
+        return jsonify({'error': 'Item niet gevonden'}), 404
+
+    db.update_wishlist_status(item_id, 'pending', error_message=None)
+    db.add_log(item_id, 'info', 'Handmatig opnieuw zoeken gestart')
+
+    return jsonify({'message': 'Zoekactie opnieuw gestart'}), 200
+
+
 @app.route('/api/wishlist/<int:item_id>/status', methods=['PUT'])
 @requires_auth
 def api_update_status(item_id: int):

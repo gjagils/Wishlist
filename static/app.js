@@ -124,6 +124,25 @@ async function deleteItem(itemId, title) {
     }
 }
 
+async function retrySearch(itemId, title) {
+    try {
+        const response = await fetch(`/api/wishlist/${itemId}/retry`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            loadWishlist();
+            loadLogs();
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Opnieuw zoeken mislukt');
+        }
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+    }
+}
+
 async function deleteAllFound() {
     const foundItems = wishlistData.items.filter(item => item.status === 'found');
 
@@ -199,6 +218,7 @@ function renderWishlist() {
                 </div>
                 <div class="item-actions">
                     <span class="status-badge status-${item.status}">${getStatusText(item.status)}</span>
+                    ${item.status !== 'searching' ? `<button class="btn btn-secondary" onclick="retrySearch(${item.id}, '${escapeHtml(item.title)}')">Opnieuw zoeken</button>` : ''}
                     <button class="btn btn-danger" onclick="deleteItem(${item.id}, '${escapeHtml(item.title)}')">
                         Verwijder
                     </button>

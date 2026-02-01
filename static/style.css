@@ -198,6 +198,17 @@ body {
     background: #c0392b;
 }
 
+.btn-secondary {
+    background: var(--accent-color);
+    color: white;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+.btn-secondary:hover {
+    background: #2980b9;
+}
+
 /* Filters */
 .filters {
     display: flex;
