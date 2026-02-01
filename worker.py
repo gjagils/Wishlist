@@ -205,10 +205,15 @@ def sab_addurl(nzb_url: str, nzbname: str) -> bool:
         r.raise_for_status()
 
         data = r.json()
-        return bool(data.get("status")) or bool(data.get("nzo_ids"))
+        success = bool(data.get("status")) or bool(data.get("nzo_ids"))
+        if not success:
+            db.add_log(None, "error", f"SABnzbd afgewezen: {data}")
+            print(f"   ✗ SABnzbd response: {data}")
+        return success
 
     except Exception as e:
         db.add_log(None, "error", f"SABnzbd fout: {e}")
+        print(f"   ✗ SABnzbd exception: {e}")
         return False
 
 

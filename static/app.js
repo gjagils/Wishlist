@@ -207,6 +207,33 @@ async function deleteAllFound() {
     }
 }
 
+async function restartApp() {
+    if (!confirm('Weet je zeker dat je de applicatie wilt herstarten?')) {
+        return;
+    }
+
+    const btn = document.getElementById('btn-restart');
+    btn.disabled = true;
+    btn.textContent = '⏳ Herstarten...';
+
+    try {
+        await fetch('/api/restart', {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        btn.textContent = '✓ Herstart bezig';
+        // Probeer na 5 seconden de pagina te herladen
+        setTimeout(() => {
+            window.location.reload();
+        }, 5000);
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+        btn.disabled = false;
+        btn.textContent = '🔄 Herstart';
+    }
+}
+
 // ===== RENDER FUNCTIONS =====
 function updateStats(stats) {
     document.getElementById('stat-total').innerHTML = `Totaal: <strong>${stats.total}</strong>`;
