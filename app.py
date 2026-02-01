@@ -358,7 +358,7 @@ def api_update():
 @app.route('/api/restart', methods=['POST'])
 @requires_auth
 def api_restart():
-    """Herstart de applicatie."""
+    """Herstart de applicatie (stuurt SIGTERM naar parent process)."""
     import signal
     import time as _time
 
@@ -366,7 +366,13 @@ def api_restart():
 
     def _restart():
         _time.sleep(1)
-        os.kill(os.getpid(), signal.SIGTERM)
+        # Stuur SIGTERM naar parent process (run_all.py) zodat alles herstart
+        ppid = os.getppid()
+        try:
+            os.kill(ppid, signal.SIGTERM)
+        except ProcessLookupError:
+            # Fallback: herstart alleen dit process
+            os.kill(os.getpid(), signal.SIGTERM)
 
     thread = threading.Thread(target=_restart, daemon=True)
     thread.start()
