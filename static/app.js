@@ -124,6 +124,55 @@ async function deleteItem(itemId, title) {
     }
 }
 
+async function startSearchNow() {
+    const btn = document.getElementById('btn-search-now');
+    btn.disabled = true;
+    btn.textContent = '⏳ Bezig...';
+
+    try {
+        const response = await fetch('/api/search/start', {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            btn.textContent = '✓ Gestart';
+            loadWishlist();
+            loadLogs();
+        } else {
+            alert(data.error || 'Zoekactie starten mislukt');
+        }
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+    } finally {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.textContent = '🔍 Nu zoeken';
+        }, 3000);
+    }
+}
+
+async function retrySearch(itemId, title) {
+    try {
+        const response = await fetch(`/api/wishlist/${itemId}/retry`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            loadWishlist();
+            loadLogs();
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Opnieuw zoeken mislukt');
+        }
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+    }
+}
+
 async function deleteAllFound() {
     const foundItems = wishlistData.items.filter(item => item.status === 'found');
 
@@ -199,6 +248,7 @@ function renderWishlist() {
                 </div>
                 <div class="item-actions">
                     <span class="status-badge status-${item.status}">${getStatusText(item.status)}</span>
+                    ${item.status !== 'searching' ? `<button class="btn btn-secondary" onclick="retrySearch(${item.id}, '${escapeHtml(item.title)}')">Opnieuw zoeken</button>` : ''}
                     <button class="btn btn-danger" onclick="deleteItem(${item.id}, '${escapeHtml(item.title)}')">
                         Verwijder
                     </button>
