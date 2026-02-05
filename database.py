@@ -93,6 +93,13 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
         """)
 
+        # Migratie: voeg shelf kolommen toe indien nog niet aanwezig
+        try:
+            conn.execute("SELECT shelf_name FROM wishlist LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE wishlist ADD COLUMN shelf_name TEXT")
+            print("Database migratie: shelf_name kolom toegevoegd")
+
     # Set permissions op database file en WAL files
     try:
         if os.path.exists(DB_PATH):
@@ -161,7 +168,8 @@ def migrate_from_txt(txt_path: str) -> int:
 
 # ===== WISHLIST CRUD =====
 
-def add_wishlist_item(author: str, title: str, added_via: str = "web") -> int:
+def add_wishlist_item(author: str, title: str, added_via: str = "web",
+                     shelf_name: Optional[str] = None) -> int:
     """Voeg nieuw item toe aan wishlist."""
     raw_line = f'{author} - "{title}"'
 
@@ -176,9 +184,9 @@ def add_wishlist_item(author: str, title: str, added_via: str = "web") -> int:
             raise ValueError(f"Item bestaat al: {raw_line}")
 
         cursor = conn.execute(
-            """INSERT INTO wishlist (author, title, raw_line, added_via)
-               VALUES (?, ?, ?, ?)""",
-            (author, title, raw_line, added_via)
+            """INSERT INTO wishlist (author, title, raw_line, added_via, shelf_name)
+               VALUES (?, ?, ?, ?, ?)""",
+            (author, title, raw_line, added_via, shelf_name)
         )
         item_id = cursor.lastrowid
 

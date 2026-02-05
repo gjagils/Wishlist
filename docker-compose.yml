@@ -42,6 +42,12 @@ services:
       # Laat leeg om alle senders toe te staan
       - EMAIL_ALLOWED_SENDERS=
 
+      # === OPTIONEEL: Calibre-Web integratie (boekenplanken) ===
+      # Laat leeg om boekenplanken uit te schakelen
+      - CALIBREWEB_URL=
+      - CALIBREWEB_USERNAME=
+      - CALIBREWEB_PASSWORD=
+
       # === OPTIONEEL: Worker interval ===
       - INTERVAL_SECONDS=900
 

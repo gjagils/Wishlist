@@ -6,6 +6,7 @@ let wishlistData = { items: [], stats: {} };
 document.addEventListener('DOMContentLoaded', () => {
     loadWishlist();
     loadLogs();
+    loadShelves();
     setupEventListeners();
 
     // Auto-refresh elke 30 seconden
@@ -32,6 +33,32 @@ function setupEventListeners() {
 }
 
 // ===== API CALLS =====
+async function loadShelves() {
+    try {
+        const response = await fetch('/api/shelves');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.configured || !data.shelves || data.shelves.length === 0) return;
+
+        const select = document.getElementById('shelf');
+        const group = document.getElementById('shelf-group');
+
+        // Vul dropdown met planken
+        data.shelves.forEach(shelf => {
+            const option = document.createElement('option');
+            option.value = shelf.name;
+            option.textContent = `${shelf.name} (${shelf.count})`;
+            select.appendChild(option);
+        });
+
+        // Toon de dropdown
+        group.style.display = '';
+    } catch (error) {
+        console.error('Error loading shelves:', error);
+    }
+}
+
 async function loadWishlist() {
     try {
         const response = await fetch('/api/wishlist');
@@ -66,31 +93,31 @@ async function handleAddItem(e) {
 
     const author = document.getElementById('author').value.trim();
     const title = document.getElementById('title').value.trim();
+    const shelfSelect = document.getElementById('shelf');
+    const shelfName = shelfSelect ? shelfSelect.value : '';
     const messageEl = document.getElementById('add-message');
-
-    console.log('Author:', author, 'Title:', title); // DEBUG
 
     if (!author || !title) {
         showMessage(messageEl, 'Vul beide velden in', 'error');
         return;
     }
 
+    const body = { author, title };
+    if (shelfName) body.shelf_name = shelfName;
+
     try {
-        console.log('Sending POST request...'); // DEBUG
         const response = await fetch('/api/wishlist', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ author, title }),
-            credentials: 'include'  // Zorg dat auth cookies worden meegestuurd
+            body: JSON.stringify(body),
+            credentials: 'include'
         });
 
-        console.log('Response status:', response.status); // DEBUG
-
         const data = await response.json();
-        console.log('Response data:', data); // DEBUG
 
         if (response.ok) {
-            showMessage(messageEl, `✓ ${author} - "${title}" toegevoegd!`, 'success');
+            const shelfMsg = shelfName ? ` → ${shelfName}` : '';
+            showMessage(messageEl, `✓ ${author} - "${title}" toegevoegd!${shelfMsg}`, 'success');
             document.getElementById('add-form').reset();
             loadWishlist();
             loadLogs();
@@ -274,6 +301,7 @@ function renderWishlist() {
                     <div class="item-author">door ${escapeHtml(item.author)}</div>
                 </div>
                 <div class="item-actions">
+                    ${item.shelf_name ? `<span class="shelf-badge">${escapeHtml(item.shelf_name)}</span>` : ''}
                     <span class="status-badge status-${item.status}">${getStatusText(item.status)}</span>
                     ${item.status !== 'searching' ? `<button class="btn btn-secondary" onclick="retrySearch(${item.id}, '${escapeHtml(item.title)}')">Opnieuw zoeken</button>` : ''}
                     <button class="btn btn-danger" onclick="deleteItem(${item.id}, '${escapeHtml(item.title)}')">
