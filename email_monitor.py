@@ -52,28 +52,30 @@ def decode_header_value(header_value: str) -> str:
     return ''.join(result)
 
 
-def extract_wishlist_items(subject: str, body: str) -> List[Tuple[str, str]]:
+def extract_wishlist_items(subject: str, body: str) -> List[Tuple[str, str, Optional[str]]]:
     """
     Extract wishlist items uit email subject of body.
 
     Formaten:
     - auteur - "titel"
+    - auteur - "titel" > boekenplank
     - Wishlist: auteur - "titel"
-    - Voeg toe: auteur - "titel"
+    - Voeg toe: auteur - "titel" > boekenplank
 
-    Returns: List van (author, title) tuples
+    Returns: List van (author, title, shelf_name) tuples
     """
     items = []
 
-    # Patroon: auteur - "titel"
-    pattern = r'([^-"]+?)\s*-\s*["\u201C]([^"]+)["\u201D]'
+    # Patroon: auteur - "titel" optioneel > plank
+    pattern = r'([^-"]+?)\s*-\s*["\u201C]([^"\u201D]+)["\u201D]\s*(?:>\s*(.+?))?\s*$'
 
     # Probeer subject
     for match in re.finditer(pattern, subject):
         author = match.group(1).strip()
         title = match.group(2).strip()
+        shelf = (match.group(3) or '').strip() or None
         if author and title:
-            items.append((author, title))
+            items.append((author, title, shelf))
 
     # Probeer body (elke regel)
     for line in body.split('\n'):
@@ -89,8 +91,9 @@ def extract_wishlist_items(subject: str, body: str) -> List[Tuple[str, str]]:
         for match in re.finditer(pattern, line):
             author = match.group(1).strip()
             title = match.group(2).strip()
+            shelf = (match.group(3) or '').strip() or None
             if author and title:
-                items.append((author, title))
+                items.append((author, title, shelf))
 
     return items
 
@@ -171,14 +174,16 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
             return 0
 
         # Voeg items toe
-        for author, title in items:
+        for author, title, shelf_name in items:
             try:
                 item_id = db.add_wishlist_item(
                     author=author,
                     title=title,
-                    added_via='email'
+                    added_via='email',
+                    shelf_name=shelf_name
                 )
-                print(f"   ✓ Toegevoegd: {author} - \"{title}\"")
+                shelf_msg = f" → {shelf_name}" if shelf_name else ""
+                print(f"   ✓ Toegevoegd: {author} - \"{title}\"{shelf_msg}")
                 added_count += 1
 
             except ValueError as e:
