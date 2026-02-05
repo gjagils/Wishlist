@@ -206,6 +206,11 @@ def sab_addurl(nzb_url: str, nzbname: str) -> bool:
 
         data = r.json()
         success = bool(data.get("status")) or bool(data.get("nzo_ids"))
+
+        if not success:
+            print(f"   ✗ SABnzbd response: {data}")
+            db.add_log(None, "error", f"SABnzbd weigerde NZB: {data.get('error', data)}")
+
         if not success:
             db.add_log(None, "error", f"SABnzbd afgewezen: {data}")
             print(f"   ✗ SABnzbd response: {data}")
