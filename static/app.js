@@ -201,30 +201,34 @@ async function retrySearch(itemId, title) {
 }
 
 async function deleteAllFound() {
-    const foundItems = wishlistData.items.filter(item => item.status === 'found');
+    const doneItems = wishlistData.items.filter(item => item.status === 'found' || item.status === 'shelved');
 
-    if (foundItems.length === 0) {
-        alert('Geen gevonden items om te verwijderen');
+    if (doneItems.length === 0) {
+        alert('Geen afgeronde items om te verwijderen');
         return;
     }
 
-    if (!confirm(`Weet je zeker dat je alle ${foundItems.length} gevonden item(s) wilt verwijderen?`)) {
+    if (!confirm(`Weet je zeker dat je alle ${doneItems.length} afgeronde item(s) wilt verwijderen?`)) {
         return;
     }
 
     try {
-        const response = await fetch('/api/wishlist/bulk-delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'found' }),
-            credentials: 'include'
-        });
-
-        if (response.ok) {
-            const data = await response.json();
-            alert(`✓ ${data.deleted} item(s) verwijderd`);
-            loadWishlist();
-            loadLogs();
+        let totalDeleted = 0;
+        for (const status of ['found', 'shelved']) {
+            const response = await fetch('/api/wishlist/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status }),
+                credentials: 'include'
+            });
+            if (response.ok) {
+                const data = await response.json();
+                totalDeleted += data.deleted;
+            }
+        }
+        alert(`✓ ${totalDeleted} item(s) verwijderd`);
+        loadWishlist();
+        loadLogs();
         } else {
             const data = await response.json();
             alert(data.error || 'Verwijderen mislukt');
