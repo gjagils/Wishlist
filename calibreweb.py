@@ -126,19 +126,33 @@ def _parse_shelves(html: str) -> List[Dict]:
     """
     shelves = []
 
-    # Zoek alle shelf links: <a href="/shelf/123">Naam (Openbaar) <span...>5</span></a>
-    pattern = r'href="[^"]*?/shelf/(\d+)"[^>]*>\s*(?:<[^>]+>\s*)*([^<]+?)(?:\s*<span[^>]*class="[^"]*badge[^"]*"[^>]*>\s*(\d+)\s*</span>)?'
-    matches = re.findall(pattern, html, re.DOTALL)
+    # Zoek alle shelf links: <a href="/shelf/123">...Naam (Openbaar)...<span class="badge">5</span></a>
+    # Stap 1: vind alle shelf <a> blokken
+    link_pattern = r'href="[^"]*?/shelf/(\d+)"[^>]*>(.*?)</a>'
+    for match in re.finditer(link_pattern, html, re.DOTALL):
+        shelf_id = match.group(1)
+        inner = match.group(2)
 
-    for shelf_id, name, count in matches:
-        name = name.strip()
+        # Stap 2: verwijder HTML tags om de naam te krijgen
+        name = re.sub(r'<[^>]+>', ' ', inner).strip()
+        # Verwijder extra whitespace
+        name = re.sub(r'\s+', ' ', name).strip()
+
         if not name:
             continue
+
+        # Stap 3: extract count uit badge span
+        count_match = re.search(r'class="[^"]*badge[^"]*"[^>]*>\s*(\d+)\s*<', inner)
+        count = int(count_match.group(1)) if count_match else 0
+
+        # Verwijder count uit naam als het erin zit
+        if count:
+            name = re.sub(r'\s*\d+\s*$', '', name).strip()
 
         shelves.append({
             "id": int(shelf_id),
             "name": name,
-            "count": int(count) if count else 0,
+            "count": count,
         })
 
     # Verwijder duplicaten (kan voorkomen door meerdere links naar zelfde shelf)
