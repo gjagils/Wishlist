@@ -12,6 +12,7 @@ from lxml import etree
 from typing import List, Optional, Set
 
 import database as db
+import calibreweb
 
 # Config via environment
 SPOTWEB_BASE_URL = os.environ["SPOTWEB_BASE_URL"].rstrip("/")
@@ -259,15 +260,23 @@ def process_item(item: dict) -> None:
 
         if success:
             print(f"   ✓ Toegevoegd aan SABnzbd")
-            db.update_wishlist_status(
-                item_id,
-                "found",
-                nzb_url=nzb_url
-            )
-            db.add_log(item_id, "info", "✓ Toegevoegd aan SABnzbd")
+            shelf_name = item.get('shelf_name')
 
-            # Optioneel: verwijder item automatisch na toevoegen
-            # db.delete_wishlist_item(item_id)
+            if shelf_name and calibreweb.is_configured():
+                # Wacht op Calibre import, dan op plank zetten
+                db.update_wishlist_status(
+                    item_id,
+                    "importing",
+                    nzb_url=nzb_url
+                )
+                db.add_log(item_id, "info", f"✓ SABnzbd OK, wachten op Calibre import → {shelf_name}")
+            else:
+                db.update_wishlist_status(
+                    item_id,
+                    "found",
+                    nzb_url=nzb_url
+                )
+                db.add_log(item_id, "info", "✓ Toegevoegd aan SABnzbd")
 
         else:
             print(f"   ✗ Kon niet toevoegen aan SABnzbd")
@@ -288,12 +297,67 @@ def process_item(item: dict) -> None:
         db.add_log(item_id, "error", f"Fout: {e}")
 
 
+def check_importing_items() -> None:
+    """
+    Check items met status 'importing': zoek in Calibre-Web en
+    zet op boekenplank als het boek gevonden wordt.
+    """
+    if not calibreweb.is_configured():
+        return
+
+    importing = db.get_wishlist_items(status='importing')
+    if not importing:
+        return
+
+    print(f"\n📚 {len(importing)} item(s) wachten op Calibre import")
+
+    for item in importing:
+        author = item['author']
+        title = item['title']
+        shelf_name = item.get('shelf_name')
+
+        if not shelf_name:
+            # Geen plank, markeer als gevonden
+            db.update_wishlist_status(item['id'], "found")
+            continue
+
+        print(f"   📖 Zoeken in Calibre: {author} - \"{title}\"")
+
+        try:
+            book_id = calibreweb.search_book(author, title)
+
+            if not book_id:
+                print(f"   ⏳ Nog niet in Calibre, volgende keer opnieuw")
+                continue
+
+            print(f"   ✓ Gevonden in Calibre (book_id={book_id})")
+
+            # Voeg toe aan boekenplank
+            success = calibreweb.add_book_to_shelf(shelf_name, book_id)
+
+            if success:
+                print(f"   ✓ Toegevoegd aan plank: {shelf_name}")
+                db.update_wishlist_status(item['id'], "shelved")
+                db.add_log(item['id'], "info", f"✓ Op boekenplank gezet: {shelf_name}")
+            else:
+                print(f"   ✗ Kon niet op plank zetten")
+                db.add_log(item['id'], "warning", f"Boek gevonden maar plank toevoegen mislukt")
+
+        except Exception as e:
+            print(f"   ✗ Fout: {e}")
+            db.add_log(item['id'], "error", f"Calibre check fout: {e}")
+
+        time.sleep(2)
+
+
 def worker_loop() -> None:
     """Main worker loop."""
     print("🔧 Worker gestart")
     print(f"   Spotweb: {SPOTWEB_BASE_URL}")
     print(f"   SABnzbd: {SAB_BASE_URL}")
     print(f"   Interval: {INTERVAL_SECONDS}s")
+    if calibreweb.is_configured():
+        print(f"   Calibre-Web: auto-shelf actief")
 
     while True:
         try:
@@ -311,6 +375,9 @@ def worker_loop() -> None:
 
                     # Kleine pauze tussen items
                     time.sleep(2)
+
+            # Check items die wachten op Calibre import
+            check_importing_items()
 
         except Exception as e:
             print(f"❌ Fout in worker loop: {e}")

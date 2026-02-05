@@ -92,6 +92,8 @@ def api_get_wishlist():
         'pending': len([i for i in all_items if i['status'] == 'pending']),
         'searching': len([i for i in all_items if i['status'] == 'searching']),
         'found': len([i for i in all_items if i['status'] == 'found']),
+        'importing': len([i for i in all_items if i['status'] == 'importing']),
+        'shelved': len([i for i in all_items if i['status'] == 'shelved']),
         'failed': len([i for i in all_items if i['status'] == 'failed']),
     }
 
@@ -175,7 +177,7 @@ def api_bulk_delete_wishlist():
     status = data['status']
 
     # Valideer status
-    valid_statuses = ['pending', 'searching', 'found', 'failed']
+    valid_statuses = ['pending', 'searching', 'found', 'importing', 'shelved', 'failed']
     if status not in valid_statuses:
         return jsonify({'error': f'Ongeldige status. Gebruik: {", ".join(valid_statuses)}'}), 400
 
@@ -291,6 +293,8 @@ def api_get_stats():
         'pending': len([i for i in items if i['status'] == 'pending']),
         'searching': len([i for i in items if i['status'] == 'searching']),
         'found': len([i for i in items if i['status'] == 'found']),
+        'importing': len([i for i in items if i['status'] == 'importing']),
+        'shelved': len([i for i in items if i['status'] == 'shelved']),
         'failed': len([i for i in items if i['status'] == 'failed']),
         'recent_logs': logs
     }

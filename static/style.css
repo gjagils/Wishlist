@@ -362,6 +362,8 @@ body {
 .status-pending { background: var(--pending-color); color: white; }
 .status-searching { background: var(--warning-color); color: white; }
 .status-found { background: var(--success-color); color: white; }
+.status-importing { background: #2980b9; color: white; }
+.status-shelved { background: #8e44ad; color: white; }
 .status-failed { background: var(--danger-color); color: white; }
 
 .shelf-badge {
