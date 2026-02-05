@@ -222,23 +222,17 @@ def search_book(author: str, title: str) -> Optional[int]:
             auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
             timeout=15,
         )
-        print(f"      OPDS response: status={resp.status_code}, content-type={resp.headers.get('content-type', '?')}, size={len(resp.content)} bytes")
         resp.raise_for_status()
     except requests.RequestException as e:
         print(f"      OPDS zoeken mislukt: {e}")
         return None
-
-    # Debug: toon begin van response
-    print(f"      OPDS body (eerste 500 chars): {resp.text[:500]}")
 
     # Parse Atom XML
     try:
         root = etree.fromstring(resp.content)
     except Exception as e:
         print(f"      OPDS XML parse fout: {e}")
-        # Probeer fallback: web search
-        print(f"      Fallback naar web search...")
-        return _search_book_web(author, title)
+        return None
 
     # Atom namespace
     ns = {"atom": "http://www.w3.org/2005/Atom"}
@@ -249,12 +243,8 @@ def search_book(author: str, title: str) -> Optional[int]:
         entries = root.findall("entry")
 
     if not entries:
-        # Zoek alle child elements voor debug
-        children = [child.tag for child in root]
-        print(f"      Geen OPDS entries. Root children: {children[:10]}")
-        # Probeer fallback: web search
-        print(f"      Fallback naar web search...")
-        return _search_book_web(author, title)
+        print(f"      Geen OPDS resultaten voor '{query}'")
+        return None
 
     print(f"      {len(entries)} OPDS resultaat(en) gevonden")
 
@@ -269,22 +259,16 @@ def search_book(author: str, title: str) -> Optional[int]:
         entry_author_el = entry.find("atom:author/atom:name", ns)
         entry_author = entry_author_el.text if entry_author_el is not None else ""
 
-        # Zoek book ID uit links
+        # Zoek book ID uit links (cover of download URL)
         book_id = None
         for link in entry.findall("atom:link", ns):
             href = link.get("href", "")
-            book_match = re.search(r'/book/(\d+)', href)
+            book_match = re.search(r'/opds/(?:cover|download)/(\d+)', href)
+            if not book_match:
+                book_match = re.search(r'/book/(\d+)', href)
             if book_match:
                 book_id = int(book_match.group(1))
                 break
-
-        # Fallback: zoek ID in entry id
-        if book_id is None:
-            entry_id_el = entry.find("atom:id", ns)
-            if entry_id_el is not None:
-                id_match = re.search(r':book:(\d+)', entry_id_el.text or "")
-                if id_match:
-                    book_id = int(id_match.group(1))
 
         if book_id is None:
             continue
