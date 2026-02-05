@@ -238,8 +238,12 @@ def search_book(author: str, title: str) -> Optional[int]:
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     entries = root.findall("atom:entry", ns)
 
+    # Probeer ook zonder namespace (sommige Calibre-Web versies)
     if not entries:
-        print(f"      Geen OPDS resultaten")
+        entries = root.findall("entry")
+
+    if not entries:
+        print(f"      Geen OPDS resultaten voor '{query}'")
         return None
 
     print(f"      {len(entries)} OPDS resultaat(en) gevonden")
@@ -255,22 +259,16 @@ def search_book(author: str, title: str) -> Optional[int]:
         entry_author_el = entry.find("atom:author/atom:name", ns)
         entry_author = entry_author_el.text if entry_author_el is not None else ""
 
-        # Zoek book ID uit links
+        # Zoek book ID uit links (cover of download URL)
         book_id = None
         for link in entry.findall("atom:link", ns):
             href = link.get("href", "")
-            book_match = re.search(r'/book/(\d+)', href)
+            book_match = re.search(r'/opds/(?:cover|download)/(\d+)', href)
+            if not book_match:
+                book_match = re.search(r'/book/(\d+)', href)
             if book_match:
                 book_id = int(book_match.group(1))
                 break
-
-        # Fallback: zoek ID in entry id
-        if book_id is None:
-            entry_id_el = entry.find("atom:id", ns)
-            if entry_id_el is not None:
-                id_match = re.search(r':book:(\d+)', entry_id_el.text or "")
-                if id_match:
-                    book_id = int(id_match.group(1))
 
         if book_id is None:
             continue
