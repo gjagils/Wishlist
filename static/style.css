@@ -145,7 +145,8 @@ body {
     font-size: 0.9rem;
 }
 
-.form-group input {
+.form-group input,
+.form-group select {
     width: 100%;
     padding: 12px;
     border: 1px solid rgba(255,255,255,0.3);
@@ -155,7 +156,8 @@ body {
     color: var(--text-primary);
 }
 
-.form-group input:focus {
+.form-group input:focus,
+.form-group select:focus {
     outline: none;
     border-color: white;
     background: white;
@@ -361,6 +363,16 @@ body {
 .status-searching { background: var(--warning-color); color: white; }
 .status-found { background: var(--success-color); color: white; }
 .status-failed { background: var(--danger-color); color: white; }
+
+.shelf-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    background: #8e44ad;
+    color: white;
+}
 
 /* Logs */
 .log-entry {

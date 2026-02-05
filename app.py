@@ -11,6 +11,7 @@ from flask import Flask, request, jsonify, render_template_string, send_from_dir
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import database as db
+import calibreweb
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
@@ -134,7 +135,8 @@ def api_add_wishlist():
         item_id = db.add_wishlist_item(
             author=author,
             title=title,
-            added_via=data.get('added_via', 'web')
+            added_via=data.get('added_via', 'web'),
+            shelf_name=data.get('shelf_name')
         )
 
         item = db.get_wishlist_item(item_id)
@@ -294,6 +296,24 @@ def api_get_stats():
     }
 
     return jsonify(stats)
+
+
+@app.route('/api/shelves', methods=['GET'])
+@requires_auth
+def api_get_shelves():
+    """Haal boekenplanken op uit Calibre-Web."""
+    if not calibreweb.is_configured():
+        return jsonify({'shelves': [], 'configured': False})
+
+    try:
+        shelves = calibreweb.fetch_shelves()
+        return jsonify({'shelves': shelves, 'configured': True})
+    except Exception as e:
+        return jsonify({
+            'shelves': [],
+            'configured': True,
+            'error': f'Calibre-Web fout: {e}'
+        })
 
 
 @app.route('/api/health', methods=['GET'])
