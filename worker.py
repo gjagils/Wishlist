@@ -211,6 +211,9 @@ def sab_addurl(nzb_url: str, nzbname: str) -> bool:
             print(f"   ✗ SABnzbd response: {data}")
             db.add_log(None, "error", f"SABnzbd weigerde NZB: {data.get('error', data)}")
 
+        if not success:
+            db.add_log(None, "error", f"SABnzbd afgewezen: {data}")
+            print(f"   ✗ SABnzbd response: {data}")
         return success
 
     except Exception as e:
