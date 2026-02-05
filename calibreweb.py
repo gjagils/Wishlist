@@ -35,9 +35,21 @@ def _get_session() -> requests.Session:
     login_url = f"{CALIBREWEB_URL}/login"
 
     try:
-        # Haal login pagina op (voor CSRF token indien nodig)
+        # Haal login pagina op voor CSRF token
         resp = session.get(login_url, timeout=10)
         resp.raise_for_status()
+
+        # Extract CSRF token uit login formulier
+        csrf_match = re.search(
+            r'name=["\']csrf_token["\']\s+value=["\']([^"\']+)["\']',
+            resp.text
+        )
+        if not csrf_match:
+            # Probeer alternatief patroon
+            csrf_match = re.search(
+                r'id=["\']csrf_token["\']\s+[^>]*value=["\']([^"\']+)["\']',
+                resp.text
+            )
 
         # Login POST
         login_data = {
@@ -47,6 +59,10 @@ def _get_session() -> requests.Session:
             "next": "/",
             "remember_me": "on",
         }
+
+        if csrf_match:
+            login_data["csrf_token"] = csrf_match.group(1)
+
         resp = session.post(login_url, data=login_data, timeout=10, allow_redirects=True)
         resp.raise_for_status()
 
