@@ -415,7 +415,7 @@ def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
     try:
         for desc, headers, data in attempts:
             resp = session.post(url, headers=headers, data=data, timeout=10, allow_redirects=True)
-            if resp.status_code in (200, 302):
+            if resp.status_code in (200, 204, 302):
                 print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (methode={desc}, status={resp.status_code})")
                 return True
             print(f"      Poging '{desc}': status={resp.status_code}")
