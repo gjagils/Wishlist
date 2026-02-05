@@ -229,10 +229,6 @@ async function deleteAllFound() {
         alert(`✓ ${totalDeleted} item(s) verwijderd`);
         loadWishlist();
         loadLogs();
-        } else {
-            const data = await response.json();
-            alert(data.error || 'Verwijderen mislukt');
-        }
     } catch (error) {
         alert('Netwerkfout: ' + error.message);
     }
