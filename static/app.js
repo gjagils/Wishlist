@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadWishlist();
     loadLogs();
     loadShelves();
+    loadSettings();
     setupEventListeners();
 
     // Auto-refresh elke 30 seconden
@@ -229,6 +230,39 @@ async function deleteAllFound() {
         alert(`✓ ${totalDeleted} item(s) verwijderd`);
         loadWishlist();
         loadLogs();
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+    }
+}
+
+// ===== SETTINGS =====
+function toggleSettings() {
+    const panel = document.getElementById('settings-panel');
+    panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+async function loadSettings() {
+    try {
+        const response = await fetch('/api/settings');
+        if (!response.ok) return;
+        const data = await response.json();
+        document.getElementById('setting-logging').checked = data.logging_enabled;
+    } catch (error) {
+        console.error('Error loading settings:', error);
+    }
+}
+
+async function saveSetting(key, value) {
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [key]: value }),
+            credentials: 'include'
+        });
+        if (!response.ok) {
+            alert('Instelling opslaan mislukt');
+        }
     } catch (error) {
         alert('Netwerkfout: ' + error.message);
     }

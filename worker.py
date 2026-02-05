@@ -83,27 +83,19 @@ def search_variants(author: str, title: str) -> List[str]:
     """
     variants = []
 
-    # Basis: auteur titel
     variants.append(f"{author} {title}")
     variants.append(f"{title} {author}")
-
-    # Alleen titel
     variants.append(title)
-
-    # Alleen auteur
     variants.append(author)
 
-    # Laatste woord van titel (vaak kernwoord)
     title_words = title.split()
     if len(title_words) > 1:
         variants.append(title_words[-1])
 
-    # Laatste woord auteur + titel
     author_words = author.split()
     if len(author_words) > 1:
         variants.append(f"{author_words[-1]} {title}")
 
-    # Uniek houden
     seen = set()
     unique_variants = []
     for v in variants:
@@ -122,13 +114,8 @@ def spotweb_search(author: str, title: str) -> Optional[str]:
     Returns: NZB URL als gevonden, anders None
     """
     parser = etree.XMLParser(recover=True)
-    search_attempts = 0
-    total_results = 0
 
     for query in search_variants(author, title):
-        search_attempts += 1
-        print(f"   Zoekpoging {search_attempts}: '{query}'")
-
         params = {
             "apikey": SPOTWEB_APIKEY,
             "t": "search",
@@ -148,15 +135,10 @@ def spotweb_search(author: str, title: str) -> Optional[str]:
             channel = root.find("channel")
 
             if channel is None:
-                print(f"   → Geen resultaten")
                 continue
 
             results = channel.findall("item")
-            result_count = len(results)
-            total_results += result_count
-            print(f"   → {result_count} resultaten gevonden")
 
-            # Check alle resultaten
             for item in results:
                 title_el = item.find("title")
                 if title_el is None:
@@ -164,22 +146,14 @@ def spotweb_search(author: str, title: str) -> Optional[str]:
 
                 candidate_title = title_el.text or ""
 
-                # Check of het een match is
                 if candidate_matches(author, title, candidate_title):
                     enc = item.find("enclosure")
                     if enc is not None and "url" in enc.attrib:
-                        nzb_url = enc.attrib["url"]
-                        print(f"   ✓ MATCH: {candidate_title[:80]}")
-                        return nzb_url
+                        return enc.attrib["url"]
 
-        except requests.RequestException as e:
-            print(f"   ✗ Spotweb fout: {e}")
-            continue
-        except Exception as e:
-            print(f"   ✗ Parse fout: {e}")
+        except Exception:
             continue
 
-    print(f"   ✗ Niet gevonden ({search_attempts} zoekopdrachten, {total_results} resultaten)")
     return None
 
 
@@ -210,17 +184,12 @@ def sab_addurl(nzb_url: str, nzbname: str) -> bool:
         success = bool(data.get("status")) or bool(data.get("nzo_ids"))
 
         if not success:
-            print(f"   ✗ SABnzbd response: {data}")
             db.add_log(None, "error", f"SABnzbd weigerde NZB: {data.get('error', data)}")
 
-        if not success:
-            db.add_log(None, "error", f"SABnzbd afgewezen: {data}")
-            print(f"   ✗ SABnzbd response: {data}")
         return success
 
     except Exception as e:
         db.add_log(None, "error", f"SABnzbd fout: {e}")
-        print(f"   ✗ SABnzbd exception: {e}")
         return False
 
 
@@ -234,18 +203,13 @@ def process_item(item: dict) -> None:
     author = item['author']
     title = item['title']
 
-    print(f"\n🔍 Zoeken: {author} - \"{title}\"")
     db.add_log(item_id, "info", "Zoeken gestart")
-
-    # Update status naar searching
     db.update_wishlist_status(item_id, "searching")
 
     try:
-        # Zoek in Spotweb
         nzb_url = spotweb_search(author, title)
 
         if not nzb_url:
-            print(f"   ✗ Niet gevonden")
             db.update_wishlist_status(
                 item_id,
                 "pending",
@@ -253,18 +217,13 @@ def process_item(item: dict) -> None:
             )
             return
 
-        print(f"   ✓ NZB gevonden")
-
-        # Voeg toe aan SABnzbd
         nzbname = f"{author} - {title}"
         success = sab_addurl(nzb_url, nzbname)
 
         if success:
-            print(f"   ✓ Toegevoegd aan SABnzbd")
             shelf_name = item.get('shelf_name')
 
             if shelf_name and calibreweb.is_configured():
-                # Wacht op Calibre import, dan op plank zetten
                 db.update_wishlist_status(
                     item_id,
                     "importing",
@@ -280,7 +239,6 @@ def process_item(item: dict) -> None:
                 db.add_log(item_id, "info", "✓ Toegevoegd aan SABnzbd")
 
         else:
-            print(f"   ✗ Kon niet toevoegen aan SABnzbd")
             db.update_wishlist_status(
                 item_id,
                 "failed",
@@ -289,7 +247,6 @@ def process_item(item: dict) -> None:
             )
 
     except Exception as e:
-        print(f"   ✗ Fout: {e}")
         db.update_wishlist_status(
             item_id,
             "failed",
@@ -310,8 +267,6 @@ def check_importing_items() -> None:
     if not importing:
         return
 
-    print(f"\n📚 Calibre import check: {len(importing)} item(s) wachten")
-
     for item in importing:
         item_id = item['id']
         author = item['author']
@@ -323,30 +278,21 @@ def check_importing_items() -> None:
             db.add_log(item_id, "info", "Geen boekenplank, status → gevonden")
             continue
 
-        print(f"   📖 Zoeken in Calibre-Web: {author} - \"{title}\" → {shelf_name}")
-
         try:
             book_id = calibreweb.search_book(author, title)
 
             if not book_id:
-                print(f"   ⏳ Nog niet in Calibre, opnieuw over {IMPORT_CHECK_SECONDS}s")
-                db.add_log(item_id, "info", f"Nog niet in Calibre, opnieuw over {IMPORT_CHECK_SECONDS}s")
                 continue
-
-            print(f"   ✓ Gevonden in Calibre (book_id={book_id}), plank toevoegen...")
 
             success = calibreweb.add_book_to_shelf(shelf_name, book_id)
 
             if success:
-                print(f"   ✓ Op boekenplank gezet: {shelf_name}")
                 db.update_wishlist_status(item_id, "shelved")
                 db.add_log(item_id, "info", f"✓ Op boekenplank gezet: {shelf_name} (book_id={book_id})")
             else:
-                print(f"   ✗ Kon niet op plank '{shelf_name}' zetten")
                 db.add_log(item_id, "warning", f"Boek gevonden (book_id={book_id}) maar plank toevoegen mislukt")
 
         except Exception as e:
-            print(f"   ✗ Calibre-Web fout: {e}")
             db.add_log(item_id, "error", f"Calibre-Web fout: {e}")
 
         time.sleep(2)
@@ -354,12 +300,7 @@ def check_importing_items() -> None:
 
 def worker_loop() -> None:
     """Main worker loop."""
-    print("🔧 Worker gestart")
-    print(f"   Spotweb: {SPOTWEB_BASE_URL}")
-    print(f"   SABnzbd: {SAB_BASE_URL}")
-    print(f"   Zoek interval: {INTERVAL_SECONDS}s")
-    if calibreweb.is_configured():
-        print(f"   Calibre-Web: auto-shelf actief (check elke {IMPORT_CHECK_SECONDS}s)")
+    print("Worker gestart")
 
     last_search_time = 0
 
@@ -367,37 +308,27 @@ def worker_loop() -> None:
         try:
             now = time.time()
 
-            # Spotweb zoeken: elke INTERVAL_SECONDS
             if now - last_search_time >= INTERVAL_SECONDS:
                 pending_items = db.get_wishlist_items(status='pending')
 
-                if not pending_items:
-                    print(f"\n😴 Geen pending items")
-                else:
-                    print(f"\n📋 {len(pending_items)} pending item(s) gevonden")
+                if pending_items:
                     for item in pending_items:
                         process_item(item)
                         time.sleep(2)
 
                 last_search_time = time.time()
 
-            # Calibre import check: elke cyclus (IMPORT_CHECK_SECONDS)
             check_importing_items()
 
         except Exception as e:
-            print(f"❌ Fout in worker loop: {e}")
             db.add_log(None, "error", f"Worker fout: {e}")
 
-        # Korte slaap — import check draait elke IMPORT_CHECK_SECONDS
         time.sleep(IMPORT_CHECK_SECONDS)
 
 
 def main():
     """Main entry point."""
-    # Initialiseer database
     db.init_db()
-
-    # Start worker loop
     worker_loop()
 
 
