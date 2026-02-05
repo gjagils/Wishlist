@@ -174,84 +174,124 @@ def clear_cache():
 
 
 def _get_shelf_id(shelf_name: str) -> Optional[int]:
-    """Zoek shelf_id op basis van naam."""
+    """Zoek shelf_id op basis van naam. Ondersteunt fuzzy matching."""
     shelves = fetch_shelves()
+
+    # Exacte match eerst
     for shelf in shelves:
         if shelf["name"] == shelf_name:
             return shelf["id"]
+
+    # Fuzzy match: case-insensitive, "Kobo GJ" matcht "Kobo GJ (Openbaar)"
+    shelf_lower = shelf_name.lower().strip()
+    for shelf in shelves:
+        if shelf["name"].lower().startswith(shelf_lower):
+            print(f"      Shelf fuzzy match: '{shelf_name}' → '{shelf['name']}'")
+            return shelf["id"]
+
+    # Nog losser: check of alle woorden voorkomen
+    shelf_words = shelf_lower.split()
+    for shelf in shelves:
+        name_lower = shelf["name"].lower()
+        if all(w in name_lower for w in shelf_words):
+            print(f"      Shelf fuzzy match: '{shelf_name}' → '{shelf['name']}'")
+            return shelf["id"]
+
     return None
 
 
 def search_book(author: str, title: str) -> Optional[int]:
     """
-    Zoek een boek in Calibre-Web op auteur en titel.
+    Zoek een boek in Calibre-Web via de OPDS feed.
 
     Returns: book_id als gevonden, anders None
     """
     if not is_configured():
         return None
 
-    session = _get_session()
+    from lxml import etree
+
     query = f"{author} {title}"
-    print(f"      Calibre-Web zoekquery: '{query}'")
+    print(f"      OPDS zoekquery: '{query}'")
 
     try:
-        resp = session.get(
-            f"{CALIBREWEB_URL}/search",
+        # OPDS gebruikt Basic Auth, niet session cookies
+        resp = requests.get(
+            f"{CALIBREWEB_URL}/opds/search",
             params={"query": query},
+            auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
             timeout=15,
         )
         resp.raise_for_status()
     except requests.RequestException as e:
-        print(f"      Calibre-Web zoeken mislukt: {e}")
-        _invalidate_session()
+        print(f"      OPDS zoeken mislukt: {e}")
         return None
 
-    # Parse zoekresultaten: zoek book links /book/<id>
-    book_pattern = r'href="[^"]*?/book/(\d+)"'
-    book_ids = list(dict.fromkeys(re.findall(book_pattern, resp.text)))
-
-    if not book_ids:
-        print(f"      Geen zoekresultaten in Calibre-Web")
+    # Parse Atom XML
+    try:
+        root = etree.fromstring(resp.content)
+    except Exception as e:
+        print(f"      OPDS XML parse fout: {e}")
         return None
 
-    print(f"      {len(book_ids)} zoekresultaat(en) gevonden, matching controleren...")
+    # Atom namespace
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    entries = root.findall("atom:entry", ns)
 
-    # Check elk resultaat of auteur+titel matchen
+    if not entries:
+        print(f"      Geen OPDS resultaten")
+        return None
+
+    print(f"      {len(entries)} OPDS resultaat(en) gevonden")
+
     author_lower = author.lower()
     title_lower = title.lower()
     author_parts = [p.strip() for p in author_lower.split() if len(p.strip()) > 2]
     title_parts = [p.strip() for p in title_lower.split() if len(p.strip()) > 2]
 
-    for book_id in book_ids:
-        try:
-            resp = session.get(f"{CALIBREWEB_URL}/book/{book_id}", timeout=10)
-            resp.raise_for_status()
-            page_lower = resp.text.lower()
+    for entry in entries:
+        entry_title_el = entry.find("atom:title", ns)
+        entry_title = entry_title_el.text if entry_title_el is not None else ""
+        entry_author_el = entry.find("atom:author/atom:name", ns)
+        entry_author = entry_author_el.text if entry_author_el is not None else ""
 
-            # Extract boektitel uit pagina voor logging
-            page_title_match = re.search(r'<title>([^<]+)</title>', resp.text, re.IGNORECASE)
-            page_title = page_title_match.group(1).strip() if page_title_match else f"book/{book_id}"
+        # Zoek book ID uit links
+        book_id = None
+        for link in entry.findall("atom:link", ns):
+            href = link.get("href", "")
+            book_match = re.search(r'/book/(\d+)', href)
+            if book_match:
+                book_id = int(book_match.group(1))
+                break
 
-            author_ok = any(part in page_lower for part in author_parts) if author_parts else True
-            title_ok = any(part in page_lower for part in title_parts) if title_parts else True
+        # Fallback: zoek ID in entry id
+        if book_id is None:
+            entry_id_el = entry.find("atom:id", ns)
+            if entry_id_el is not None:
+                id_match = re.search(r':book:(\d+)', entry_id_el.text or "")
+                if id_match:
+                    book_id = int(id_match.group(1))
 
-            if author_ok and title_ok:
-                print(f"      ✓ Match: book_id={book_id} ({page_title})")
-                return int(book_id)
-            else:
-                reasons = []
-                if not author_ok:
-                    reasons.append(f"auteur [{', '.join(author_parts)}] niet gevonden")
-                if not title_ok:
-                    reasons.append(f"titel [{', '.join(title_parts)}] niet gevonden")
-                print(f"      ✗ Geen match: book_id={book_id} ({page_title}) - {', '.join(reasons)}")
-
-        except requests.RequestException as e:
-            print(f"      ✗ Kon book/{book_id} niet ophalen: {e}")
+        if book_id is None:
             continue
 
-    print(f"      Geen matching boek gevonden in {len(book_ids)} resultaat(en)")
+        # Match check
+        combined = f"{entry_title} {entry_author}".lower()
+        author_ok = any(part in combined for part in author_parts) if author_parts else True
+        title_ok = any(part in combined for part in title_parts) if title_parts else True
+
+        if author_ok and title_ok:
+            print(f"      ✓ Match: book_id={book_id}, '{entry_title}' door {entry_author}")
+            return book_id
+        else:
+            reasons = []
+            if not author_ok:
+                reasons.append(f"auteur [{', '.join(author_parts)}]")
+            if not title_ok:
+                reasons.append(f"titel [{', '.join(title_parts)}]")
+            print(f"      ✗ Geen match: book_id={book_id}, '{entry_title}' door {entry_author} - {', '.join(reasons)} niet gevonden")
+
+    print(f"      Geen matching boek in {len(entries)} resultaat(en)")
     return None
 
 
