@@ -193,6 +193,7 @@ def search_book(author: str, title: str) -> Optional[int]:
 
     session = _get_session()
     query = f"{author} {title}"
+    print(f"      Calibre-Web zoekquery: '{query}'")
 
     try:
         resp = session.get(
@@ -201,40 +202,56 @@ def search_book(author: str, title: str) -> Optional[int]:
             timeout=15,
         )
         resp.raise_for_status()
-    except requests.RequestException:
+    except requests.RequestException as e:
+        print(f"      Calibre-Web zoeken mislukt: {e}")
         _invalidate_session()
         return None
 
     # Parse zoekresultaten: zoek book links /book/<id>
     book_pattern = r'href="[^"]*?/book/(\d+)"'
-    book_ids = re.findall(book_pattern, resp.text)
+    book_ids = list(dict.fromkeys(re.findall(book_pattern, resp.text)))
 
     if not book_ids:
+        print(f"      Geen zoekresultaten in Calibre-Web")
         return None
+
+    print(f"      {len(book_ids)} zoekresultaat(en) gevonden, matching controleren...")
 
     # Check elk resultaat of auteur+titel matchen
     author_lower = author.lower()
     title_lower = title.lower()
+    author_parts = [p.strip() for p in author_lower.split() if len(p.strip()) > 2]
+    title_parts = [p.strip() for p in title_lower.split() if len(p.strip()) > 2]
 
-    for book_id in dict.fromkeys(book_ids):  # unieke IDs, volgorde behouden
+    for book_id in book_ids:
         try:
             resp = session.get(f"{CALIBREWEB_URL}/book/{book_id}", timeout=10)
             resp.raise_for_status()
             page_lower = resp.text.lower()
 
-            # Check of auteur en titel voorkomen op de boekpagina
-            author_parts = [p.strip() for p in author_lower.split() if len(p.strip()) > 2]
-            title_parts = [p.strip() for p in title_lower.split() if len(p.strip()) > 2]
+            # Extract boektitel uit pagina voor logging
+            page_title_match = re.search(r'<title>([^<]+)</title>', resp.text, re.IGNORECASE)
+            page_title = page_title_match.group(1).strip() if page_title_match else f"book/{book_id}"
 
             author_ok = any(part in page_lower for part in author_parts) if author_parts else True
             title_ok = any(part in page_lower for part in title_parts) if title_parts else True
 
             if author_ok and title_ok:
+                print(f"      ✓ Match: book_id={book_id} ({page_title})")
                 return int(book_id)
+            else:
+                reasons = []
+                if not author_ok:
+                    reasons.append(f"auteur [{', '.join(author_parts)}] niet gevonden")
+                if not title_ok:
+                    reasons.append(f"titel [{', '.join(title_parts)}] niet gevonden")
+                print(f"      ✗ Geen match: book_id={book_id} ({page_title}) - {', '.join(reasons)}")
 
-        except requests.RequestException:
+        except requests.RequestException as e:
+            print(f"      ✗ Kon book/{book_id} niet ophalen: {e}")
             continue
 
+    print(f"      Geen matching boek gevonden in {len(book_ids)} resultaat(en)")
     return None
 
 
@@ -246,25 +263,27 @@ def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
     """
     shelf_id = _get_shelf_id(shelf_name)
     if shelf_id is None:
-        print(f"   ✗ Boekenplank '{shelf_name}' niet gevonden in Calibre-Web")
+        print(f"      ✗ Boekenplank '{shelf_name}' niet gevonden in Calibre-Web")
+        print(f"      Beschikbare planken: {[s['name'] for s in fetch_shelves()]}")
         return False
 
+    print(f"      Plank toevoegen: shelf_id={shelf_id}, book_id={book_id}, naam='{shelf_name}'")
+
     session = _get_session()
+    url = f"{CALIBREWEB_URL}/shelf/add/{shelf_id}/{book_id}"
 
     try:
-        resp = session.post(
-            f"{CALIBREWEB_URL}/shelf/add/{shelf_id}/{book_id}",
-            timeout=10,
-            allow_redirects=True,
-        )
-        # Calibre-Web retourneert redirect of JSON bij succes
+        resp = session.post(url, timeout=10, allow_redirects=True)
+
         if resp.status_code in (200, 302):
+            print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (status={resp.status_code})")
             return True
 
-        print(f"   ✗ Shelf add response: {resp.status_code}")
+        print(f"      ✗ Onverwachte response: status={resp.status_code}, url={url}")
+        print(f"      Response body: {resp.text[:200]}")
         return False
 
     except requests.RequestException as e:
-        print(f"   ✗ Shelf add fout: {e}")
+        print(f"      ✗ HTTP fout bij plank toevoegen: {e}")
         _invalidate_session()
         return False
