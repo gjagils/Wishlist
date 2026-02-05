@@ -222,25 +222,39 @@ def search_book(author: str, title: str) -> Optional[int]:
             auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
             timeout=15,
         )
+        print(f"      OPDS response: status={resp.status_code}, content-type={resp.headers.get('content-type', '?')}, size={len(resp.content)} bytes")
         resp.raise_for_status()
     except requests.RequestException as e:
         print(f"      OPDS zoeken mislukt: {e}")
         return None
+
+    # Debug: toon begin van response
+    print(f"      OPDS body (eerste 500 chars): {resp.text[:500]}")
 
     # Parse Atom XML
     try:
         root = etree.fromstring(resp.content)
     except Exception as e:
         print(f"      OPDS XML parse fout: {e}")
-        return None
+        # Probeer fallback: web search
+        print(f"      Fallback naar web search...")
+        return _search_book_web(author, title)
 
     # Atom namespace
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     entries = root.findall("atom:entry", ns)
 
+    # Probeer ook zonder namespace (sommige Calibre-Web versies)
     if not entries:
-        print(f"      Geen OPDS resultaten")
-        return None
+        entries = root.findall("entry")
+
+    if not entries:
+        # Zoek alle child elements voor debug
+        children = [child.tag for child in root]
+        print(f"      Geen OPDS entries. Root children: {children[:10]}")
+        # Probeer fallback: web search
+        print(f"      Fallback naar web search...")
+        return _search_book_web(author, title)
 
     print(f"      {len(entries)} OPDS resultaat(en) gevonden")
 
