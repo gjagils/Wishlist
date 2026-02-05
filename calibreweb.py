@@ -331,6 +331,32 @@ def search_book(author: str, title: str) -> Optional[int]:
     return None
 
 
+def _get_csrf_token(session: requests.Session, page_url: str) -> Optional[str]:
+    """Haal CSRF token op uit een pagina."""
+    try:
+        resp = session.get(page_url, timeout=10)
+        resp.raise_for_status()
+        # Zoek csrf_token in hidden form field of meta tag
+        csrf_match = re.search(
+            r'name=["\']csrf_token["\']\s+value=["\']([^"\']+)["\']',
+            resp.text
+        )
+        if not csrf_match:
+            csrf_match = re.search(
+                r'value=["\']([^"\']+)["\']\s+[^>]*name=["\']csrf_token["\']',
+                resp.text
+            )
+        if not csrf_match:
+            # Zoek in meta tag
+            csrf_match = re.search(
+                r'<meta\s+name=["\']csrf-token["\']\s+content=["\']([^"\']+)["\']',
+                resp.text
+            )
+        return csrf_match.group(1) if csrf_match else None
+    except requests.RequestException:
+        return None
+
+
 def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
     """
     Voeg een boek toe aan een boekenplank in Calibre-Web.
@@ -348,12 +374,38 @@ def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
     session = _get_session()
     url = f"{CALIBREWEB_URL}/shelf/add/{shelf_id}/{book_id}"
 
+    # Haal CSRF token op van de boekpagina
+    book_page = f"{CALIBREWEB_URL}/book/{book_id}"
+    csrf_token = _get_csrf_token(session, book_page)
+    if not csrf_token:
+        # Fallback: probeer CSRF van hoofdpagina
+        csrf_token = _get_csrf_token(session, f"{CALIBREWEB_URL}/")
+
     try:
-        resp = session.post(url, timeout=10, allow_redirects=True)
+        headers = {"X-Requested-With": "XMLHttpRequest"}
+        if csrf_token:
+            headers["X-CSRFToken"] = csrf_token
+            print(f"      CSRF token verkregen")
+
+        resp = session.post(url, headers=headers, timeout=10, allow_redirects=True)
 
         if resp.status_code in (200, 302):
             print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (status={resp.status_code})")
             return True
+
+        # Als 400 met CSRF header, probeer als form data
+        if resp.status_code == 400 and csrf_token:
+            print(f"      CSRF via header mislukt, probeer form data...")
+            resp = session.post(
+                url,
+                data={"csrf_token": csrf_token},
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                timeout=10,
+                allow_redirects=True,
+            )
+            if resp.status_code in (200, 302):
+                print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (status={resp.status_code})")
+                return True
 
         print(f"      ✗ Onverwachte response: status={resp.status_code}, url={url}")
         print(f"      Response body: {resp.text[:200]}")
