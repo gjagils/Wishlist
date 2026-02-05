@@ -21,6 +21,7 @@ SAB_BASE_URL = os.environ["SAB_BASE_URL"].rstrip("/")
 SAB_APIKEY = os.environ["SAB_APIKEY"]
 
 INTERVAL_SECONDS = int(os.environ.get("INTERVAL_SECONDS", "900"))  # 15 min
+IMPORT_CHECK_SECONDS = int(os.environ.get("IMPORT_CHECK_SECONDS", "120"))  # 2 min
 SPOTWEB_CAT = os.environ.get("SPOTWEB_CAT", "7020")  # Ebook
 SAB_CATEGORY = os.environ.get("SAB_CATEGORY", "books")
 
@@ -309,43 +310,44 @@ def check_importing_items() -> None:
     if not importing:
         return
 
-    print(f"\n📚 {len(importing)} item(s) wachten op Calibre import")
+    print(f"\n📚 Calibre import check: {len(importing)} item(s) wachten")
 
     for item in importing:
+        item_id = item['id']
         author = item['author']
         title = item['title']
         shelf_name = item.get('shelf_name')
 
         if not shelf_name:
-            # Geen plank, markeer als gevonden
-            db.update_wishlist_status(item['id'], "found")
+            db.update_wishlist_status(item_id, "found")
+            db.add_log(item_id, "info", "Geen boekenplank, status → gevonden")
             continue
 
-        print(f"   📖 Zoeken in Calibre: {author} - \"{title}\"")
+        print(f"   📖 Zoeken in Calibre-Web: {author} - \"{title}\" → {shelf_name}")
 
         try:
             book_id = calibreweb.search_book(author, title)
 
             if not book_id:
-                print(f"   ⏳ Nog niet in Calibre, volgende keer opnieuw")
+                print(f"   ⏳ Nog niet in Calibre, opnieuw over {IMPORT_CHECK_SECONDS}s")
+                db.add_log(item_id, "info", f"Nog niet in Calibre, opnieuw over {IMPORT_CHECK_SECONDS}s")
                 continue
 
-            print(f"   ✓ Gevonden in Calibre (book_id={book_id})")
+            print(f"   ✓ Gevonden in Calibre (book_id={book_id}), plank toevoegen...")
 
-            # Voeg toe aan boekenplank
             success = calibreweb.add_book_to_shelf(shelf_name, book_id)
 
             if success:
-                print(f"   ✓ Toegevoegd aan plank: {shelf_name}")
-                db.update_wishlist_status(item['id'], "shelved")
-                db.add_log(item['id'], "info", f"✓ Op boekenplank gezet: {shelf_name}")
+                print(f"   ✓ Op boekenplank gezet: {shelf_name}")
+                db.update_wishlist_status(item_id, "shelved")
+                db.add_log(item_id, "info", f"✓ Op boekenplank gezet: {shelf_name} (book_id={book_id})")
             else:
-                print(f"   ✗ Kon niet op plank zetten")
-                db.add_log(item['id'], "warning", f"Boek gevonden maar plank toevoegen mislukt")
+                print(f"   ✗ Kon niet op plank '{shelf_name}' zetten")
+                db.add_log(item_id, "warning", f"Boek gevonden (book_id={book_id}) maar plank toevoegen mislukt")
 
         except Exception as e:
-            print(f"   ✗ Fout: {e}")
-            db.add_log(item['id'], "error", f"Calibre check fout: {e}")
+            print(f"   ✗ Calibre-Web fout: {e}")
+            db.add_log(item_id, "error", f"Calibre-Web fout: {e}")
 
         time.sleep(2)
 
@@ -355,36 +357,39 @@ def worker_loop() -> None:
     print("🔧 Worker gestart")
     print(f"   Spotweb: {SPOTWEB_BASE_URL}")
     print(f"   SABnzbd: {SAB_BASE_URL}")
-    print(f"   Interval: {INTERVAL_SECONDS}s")
+    print(f"   Zoek interval: {INTERVAL_SECONDS}s")
     if calibreweb.is_configured():
-        print(f"   Calibre-Web: auto-shelf actief")
+        print(f"   Calibre-Web: auto-shelf actief (check elke {IMPORT_CHECK_SECONDS}s)")
+
+    last_search_time = 0
 
     while True:
         try:
-            # Haal pending items op
-            pending_items = db.get_wishlist_items(status='pending')
+            now = time.time()
 
-            if not pending_items:
-                print(f"\n😴 Geen pending items, wachten {INTERVAL_SECONDS}s...")
-            else:
-                print(f"\n📋 {len(pending_items)} pending item(s) gevonden")
+            # Spotweb zoeken: elke INTERVAL_SECONDS
+            if now - last_search_time >= INTERVAL_SECONDS:
+                pending_items = db.get_wishlist_items(status='pending')
 
-                # Verwerk elk item
-                for item in pending_items:
-                    process_item(item)
+                if not pending_items:
+                    print(f"\n😴 Geen pending items")
+                else:
+                    print(f"\n📋 {len(pending_items)} pending item(s) gevonden")
+                    for item in pending_items:
+                        process_item(item)
+                        time.sleep(2)
 
-                    # Kleine pauze tussen items
-                    time.sleep(2)
+                last_search_time = time.time()
 
-            # Check items die wachten op Calibre import
+            # Calibre import check: elke cyclus (IMPORT_CHECK_SECONDS)
             check_importing_items()
 
         except Exception as e:
             print(f"❌ Fout in worker loop: {e}")
             db.add_log(None, "error", f"Worker fout: {e}")
 
-        # Wacht tot volgende run
-        time.sleep(INTERVAL_SECONDS)
+        # Korte slaap — import check draait elke IMPORT_CHECK_SECONDS
+        time.sleep(IMPORT_CHECK_SECONDS)
 
 
 def main():
