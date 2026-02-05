@@ -214,17 +214,42 @@ def search_book(author: str, title: str) -> Optional[int]:
     query = f"{author} {title}"
     print(f"      OPDS zoekquery: '{query}'")
 
-    try:
-        # OPDS gebruikt Basic Auth, niet session cookies
-        resp = requests.get(
-            f"{CALIBREWEB_URL}/opds/search",
-            params={"query": query},
-            auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
-            timeout=15,
-        )
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"      OPDS zoeken mislukt: {e}")
+    opds_url = f"{CALIBREWEB_URL}/opds/search"
+
+    # Probeer eerst met sessie-auth (werkt altijd via reverse proxy),
+    # dan fallback naar Basic Auth
+    resp = None
+    for attempt, method in enumerate(["session", "basic"], 1):
+        try:
+            if method == "session":
+                session = _get_session()
+                resp = session.get(opds_url, params={"query": query}, timeout=15)
+            else:
+                resp = requests.get(
+                    opds_url,
+                    params={"query": query},
+                    auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
+                    timeout=15,
+                )
+            resp.raise_for_status()
+
+            # Check of we XML terugkrijgen (niet een HTML login pagina)
+            content_type = resp.headers.get("content-type", "")
+            if "html" in content_type:
+                print(f"      OPDS poging {attempt} ({method}): kreeg HTML terug i.p.v. XML")
+                if method == "session":
+                    _invalidate_session()
+                resp = None
+                continue
+            break
+        except Exception as e:
+            print(f"      OPDS poging {attempt} ({method}) mislukt: {e}")
+            if method == "session":
+                _invalidate_session()
+            continue
+
+    if resp is None:
+        print(f"      OPDS zoeken volledig mislukt voor '{query}'")
         return None
 
     # Parse Atom XML
@@ -232,6 +257,8 @@ def search_book(author: str, title: str) -> Optional[int]:
         root = etree.fromstring(resp.content)
     except Exception as e:
         print(f"      OPDS XML parse fout: {e}")
+        print(f"      Response content-type: {resp.headers.get('content-type', '?')}")
+        print(f"      Response begin: {resp.text[:200]}")
         return None
 
     # Atom namespace
@@ -243,7 +270,9 @@ def search_book(author: str, title: str) -> Optional[int]:
         entries = root.findall("entry")
 
     if not entries:
-        print(f"      Geen OPDS resultaten voor '{query}'")
+        # Toon wat we wel kregen voor diagnose
+        children = [child.tag.split("}")[-1] if "}" in child.tag else child.tag for child in root]
+        print(f"      Geen OPDS resultaten voor '{query}' (root elementen: {children[:5]})")
         return None
 
     print(f"      {len(entries)} OPDS resultaat(en) gevonden")
