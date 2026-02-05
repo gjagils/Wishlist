@@ -171,3 +171,100 @@ def clear_cache():
     global _shelves_cache, _cache_time
     _shelves_cache = None
     _cache_time = 0
+
+
+def _get_shelf_id(shelf_name: str) -> Optional[int]:
+    """Zoek shelf_id op basis van naam."""
+    shelves = fetch_shelves()
+    for shelf in shelves:
+        if shelf["name"] == shelf_name:
+            return shelf["id"]
+    return None
+
+
+def search_book(author: str, title: str) -> Optional[int]:
+    """
+    Zoek een boek in Calibre-Web op auteur en titel.
+
+    Returns: book_id als gevonden, anders None
+    """
+    if not is_configured():
+        return None
+
+    session = _get_session()
+    query = f"{author} {title}"
+
+    try:
+        resp = session.get(
+            f"{CALIBREWEB_URL}/search",
+            params={"query": query},
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.RequestException:
+        _invalidate_session()
+        return None
+
+    # Parse zoekresultaten: zoek book links /book/<id>
+    book_pattern = r'href="[^"]*?/book/(\d+)"'
+    book_ids = re.findall(book_pattern, resp.text)
+
+    if not book_ids:
+        return None
+
+    # Check elk resultaat of auteur+titel matchen
+    author_lower = author.lower()
+    title_lower = title.lower()
+
+    for book_id in dict.fromkeys(book_ids):  # unieke IDs, volgorde behouden
+        try:
+            resp = session.get(f"{CALIBREWEB_URL}/book/{book_id}", timeout=10)
+            resp.raise_for_status()
+            page_lower = resp.text.lower()
+
+            # Check of auteur en titel voorkomen op de boekpagina
+            author_parts = [p.strip() for p in author_lower.split() if len(p.strip()) > 2]
+            title_parts = [p.strip() for p in title_lower.split() if len(p.strip()) > 2]
+
+            author_ok = any(part in page_lower for part in author_parts) if author_parts else True
+            title_ok = any(part in page_lower for part in title_parts) if title_parts else True
+
+            if author_ok and title_ok:
+                return int(book_id)
+
+        except requests.RequestException:
+            continue
+
+    return None
+
+
+def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
+    """
+    Voeg een boek toe aan een boekenplank in Calibre-Web.
+
+    Returns: True als succesvol
+    """
+    shelf_id = _get_shelf_id(shelf_name)
+    if shelf_id is None:
+        print(f"   ✗ Boekenplank '{shelf_name}' niet gevonden in Calibre-Web")
+        return False
+
+    session = _get_session()
+
+    try:
+        resp = session.post(
+            f"{CALIBREWEB_URL}/shelf/add/{shelf_id}/{book_id}",
+            timeout=10,
+            allow_redirects=True,
+        )
+        # Calibre-Web retourneert redirect of JSON bij succes
+        if resp.status_code in (200, 302):
+            return True
+
+        print(f"   ✗ Shelf add response: {resp.status_code}")
+        return False
+
+    except requests.RequestException as e:
+        print(f"   ✗ Shelf add fout: {e}")
+        _invalidate_session()
+        return False

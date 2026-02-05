@@ -267,6 +267,8 @@ function updateStats(stats) {
     document.getElementById('stat-pending').innerHTML = `Pending: <strong>${stats.pending}</strong>`;
     document.getElementById('stat-searching').innerHTML = `Zoeken: <strong>${stats.searching}</strong>`;
     document.getElementById('stat-found').innerHTML = `Gevonden: <strong>${stats.found}</strong>`;
+    document.getElementById('stat-importing').innerHTML = `Importeren: <strong>${stats.importing || 0}</strong>`;
+    document.getElementById('stat-shelved').innerHTML = `Op plank: <strong>${stats.shelved || 0}</strong>`;
     document.getElementById('stat-failed').innerHTML = `Mislukt: <strong>${stats.failed}</strong>`;
 }
 
@@ -289,9 +291,10 @@ function renderWishlist() {
         return;
     }
 
-    // Sorteer items: niet-gevonden eerst, dan gevonden
-    const unfoundItems = items.filter(item => item.status !== 'found');
-    const foundItems = items.filter(item => item.status === 'found');
+    // Sorteer items: actieve items eerst, dan afgeronde (found/shelved)
+    const doneStatuses = ['found', 'shelved'];
+    const unfoundItems = items.filter(item => !doneStatuses.includes(item.status));
+    const foundItems = items.filter(item => doneStatuses.includes(item.status));
 
     const renderItem = (item) => `
         <div class="wishlist-item">
@@ -379,6 +382,8 @@ function getStatusText(status) {
         'pending': 'Pending',
         'searching': 'Zoeken...',
         'found': 'Gevonden',
+        'importing': 'Importeren...',
+        'shelved': 'Op plank',
         'failed': 'Mislukt'
     };
     return statusMap[status] || status;
