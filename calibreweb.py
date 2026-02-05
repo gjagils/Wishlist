@@ -5,6 +5,7 @@ Haalt boekenplanken op via de Calibre-Web web interface.
 """
 import os
 import re
+import unicodedata
 import requests
 from typing import List, Dict, Optional
 
@@ -278,10 +279,15 @@ def search_book(author: str, title: str) -> Optional[int]:
         return None
 
     # Match entries tegen auteur en titel
-    author_lower = author.lower()
-    title_lower = title.lower()
-    author_parts = [p.strip() for p in author_lower.split() if len(p.strip()) > 2]
-    title_parts = [p.strip() for p in title_lower.split() if len(p.strip()) > 2]
+    # Strip accenten voor vergelijking (björg → bjorg, aegisdóttir → aegisdottir)
+    def _normalize(text: str) -> str:
+        text = unicodedata.normalize("NFD", text.lower())
+        return "".join(c for c in text if unicodedata.category(c) != "Mn")
+
+    author_norm = _normalize(author)
+    title_norm = _normalize(title)
+    author_parts = [p.strip() for p in author_norm.split() if len(p.strip()) > 2]
+    title_parts = [p.strip() for p in title_norm.split() if len(p.strip()) > 2]
 
     ns = {"atom": "http://www.w3.org/2005/Atom"}
 
@@ -305,8 +311,8 @@ def search_book(author: str, title: str) -> Optional[int]:
         if book_id is None:
             continue
 
-        # Match check
-        combined = f"{entry_title} {entry_author}".lower()
+        # Match check (accent-insensitive)
+        combined = _normalize(f"{entry_title} {entry_author}")
         author_ok = any(part in combined for part in author_parts) if author_parts else True
         title_ok = any(part in combined for part in title_parts) if title_parts else True
 
