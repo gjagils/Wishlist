@@ -42,15 +42,9 @@ def _get_session() -> requests.Session:
 
         # Extract CSRF token uit login formulier
         csrf_match = re.search(
-            r'name=["\']csrf_token["\']\s+value=["\']([^"\']+)["\']',
+            r'name=["\']csrf_token["\'][^>]*value=["\']([^"\']+)["\']',
             resp.text
         )
-        if not csrf_match:
-            # Probeer alternatief patroon
-            csrf_match = re.search(
-                r'id=["\']csrf_token["\']\s+[^>]*value=["\']([^"\']+)["\']',
-                resp.text
-            )
 
         # Login POST
         login_data = {
@@ -128,21 +122,19 @@ def _parse_shelves(html: str) -> List[Dict]:
     shelves = []
 
     # Zoek alle shelf links: <a href="/shelf/123">...Naam (Openbaar)...<span class="badge">5</span></a>
-    # Stap 1: vind alle shelf <a> blokken
     link_pattern = r'href="[^"]*?/shelf/(\d+)"[^>]*>(.*?)</a>'
     for match in re.finditer(link_pattern, html, re.DOTALL):
         shelf_id = match.group(1)
         inner = match.group(2)
 
-        # Stap 2: verwijder HTML tags om de naam te krijgen
+        # Verwijder HTML tags om de naam te krijgen
         name = re.sub(r'<[^>]+>', ' ', inner).strip()
-        # Verwijder extra whitespace
         name = re.sub(r'\s+', ' ', name).strip()
 
         if not name:
             continue
 
-        # Stap 3: extract count uit badge span
+        # Extract count uit badge span
         count_match = re.search(r'class="[^"]*badge[^"]*"[^>]*>\s*(\d+)\s*<', inner)
         count = int(count_match.group(1)) if count_match else 0
 
@@ -156,7 +148,7 @@ def _parse_shelves(html: str) -> List[Dict]:
             "count": count,
         })
 
-    # Verwijder duplicaten (kan voorkomen door meerdere links naar zelfde shelf)
+    # Verwijder duplicaten
     seen = set()
     unique = []
     for s in shelves:
@@ -187,7 +179,6 @@ def _get_shelf_id(shelf_name: str) -> Optional[int]:
     shelf_lower = shelf_name.lower().strip()
     for shelf in shelves:
         if shelf["name"].lower().startswith(shelf_lower):
-            print(f"      Shelf fuzzy match: '{shelf_name}' → '{shelf['name']}'")
             return shelf["id"]
 
     # Nog losser: check of alle woorden voorkomen
@@ -195,7 +186,6 @@ def _get_shelf_id(shelf_name: str) -> Optional[int]:
     for shelf in shelves:
         name_lower = shelf["name"].lower()
         if all(w in name_lower for w in shelf_words):
-            print(f"      Shelf fuzzy match: '{shelf_name}' → '{shelf['name']}'")
             return shelf["id"]
 
     return None
@@ -218,20 +208,16 @@ def _opds_search(query: str) -> Optional[list]:
             timeout=15,
         )
         resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"      OPDS request mislukt: {e}")
+    except requests.RequestException:
         return None
 
-    # Check of we XML terugkrijgen
     content_type = resp.headers.get("content-type", "")
     if "html" in content_type:
-        print(f"      OPDS gaf HTML terug i.p.v. XML (auth probleem?)")
         return None
 
     try:
         root = etree.fromstring(resp.content)
-    except Exception as e:
-        print(f"      OPDS XML parse fout: {e}")
+    except Exception:
         return None
 
     ns = {"atom": "http://www.w3.org/2005/Atom"}
@@ -240,6 +226,12 @@ def _opds_search(query: str) -> Optional[list]:
         entries = root.findall("entry")
 
     return entries if entries else None
+
+
+def _normalize(text: str) -> str:
+    """Strip accenten voor vergelijking (björg → bjorg, aegisdóttir → aegisdottir)."""
+    text = unicodedata.normalize("NFD", text.lower())
+    return "".join(c for c in text if unicodedata.category(c) != "Mn")
 
 
 def search_book(author: str, title: str) -> Optional[int]:
@@ -254,7 +246,6 @@ def search_book(author: str, title: str) -> Optional[int]:
 
     # Probeer meerdere queries - Calibre-Web OPDS zoekt soms alleen op één veld
     queries = [title, f"{author} {title}", author]
-    # Verwijder duplicaten met behoud van volgorde
     seen = set()
     unique_queries = []
     for q in queries:
@@ -264,30 +255,17 @@ def search_book(author: str, title: str) -> Optional[int]:
             unique_queries.append(q)
 
     entries = None
-    used_query = None
     for query in unique_queries:
-        print(f"      OPDS zoekquery: '{query}'")
         entries = _opds_search(query)
         if entries:
-            used_query = query
-            print(f"      {len(entries)} OPDS resultaat(en) gevonden")
             break
-        print(f"      Geen resultaten")
 
     if not entries:
-        print(f"      Geen OPDS resultaten na {len(unique_queries)} pogingen")
         return None
 
     # Match entries tegen auteur en titel
-    # Strip accenten voor vergelijking (björg → bjorg, aegisdóttir → aegisdottir)
-    def _normalize(text: str) -> str:
-        text = unicodedata.normalize("NFD", text.lower())
-        return "".join(c for c in text if unicodedata.category(c) != "Mn")
-
-    author_norm = _normalize(author)
-    title_norm = _normalize(title)
-    author_parts = [p.strip() for p in author_norm.split() if len(p.strip()) > 2]
-    title_parts = [p.strip() for p in title_norm.split() if len(p.strip()) > 2]
+    author_parts = [p.strip() for p in _normalize(author).split() if len(p.strip()) > 2]
+    title_parts = [p.strip() for p in _normalize(title).split() if len(p.strip()) > 2]
 
     ns = {"atom": "http://www.w3.org/2005/Atom"}
 
@@ -317,17 +295,8 @@ def search_book(author: str, title: str) -> Optional[int]:
         title_ok = any(part in combined for part in title_parts) if title_parts else True
 
         if author_ok and title_ok:
-            print(f"      ✓ Match: book_id={book_id}, '{entry_title}' door {entry_author}")
             return book_id
-        else:
-            reasons = []
-            if not author_ok:
-                reasons.append(f"auteur [{', '.join(author_parts)}]")
-            if not title_ok:
-                reasons.append(f"titel [{', '.join(title_parts)}]")
-            print(f"      ✗ Geen match: book_id={book_id}, '{entry_title}' door {entry_author} - {', '.join(reasons)} niet gevonden")
 
-    print(f"      Geen matching boek in {len(entries)} resultaat(en)")
     return None
 
 
@@ -337,27 +306,14 @@ def _get_csrf_token(session: requests.Session, page_url: str) -> Optional[str]:
         resp = session.get(page_url, timeout=10)
         resp.raise_for_status()
 
-        # Patroon 1: <input name="csrf_token" ... value="xxx">
+        # Zoek csrf_token in hidden form fields
         csrf_match = re.search(
             r'name=["\']csrf_token["\'][^>]*value=["\']([^"\']+)["\']',
             resp.text
         )
-        # Patroon 2: <input value="xxx" ... name="csrf_token">
         if not csrf_match:
             csrf_match = re.search(
                 r'value=["\']([^"\']+)["\'][^>]*name=["\']csrf_token["\']',
-                resp.text
-            )
-        # Patroon 3: <meta name="csrf-token" content="xxx">
-        if not csrf_match:
-            csrf_match = re.search(
-                r'<meta\s+[^>]*name=["\']csrf-token["\'][^>]*content=["\']([^"\']+)["\']',
-                resp.text
-            )
-        # Patroon 4: csrf_token in JavaScript variable
-        if not csrf_match:
-            csrf_match = re.search(
-                r'csrf_token\s*[=:]\s*["\']([^"\']+)["\']',
                 resp.text
             )
 
@@ -368,10 +324,8 @@ def _get_csrf_token(session: requests.Session, page_url: str) -> Optional[str]:
         if "csrf_token" in session.cookies:
             return session.cookies["csrf_token"]
 
-        print(f"      Geen CSRF token gevonden op {page_url} (pagina={len(resp.text)} bytes, url={resp.url})")
         return None
-    except requests.RequestException as e:
-        print(f"      CSRF ophalen mislukt: {e}")
+    except requests.RequestException:
         return None
 
 
@@ -383,49 +337,29 @@ def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
     """
     shelf_id = _get_shelf_id(shelf_name)
     if shelf_id is None:
-        print(f"      ✗ Boekenplank '{shelf_name}' niet gevonden in Calibre-Web")
-        print(f"      Beschikbare planken: {[s['name'] for s in fetch_shelves()]}")
+        print(f"      ✗ Plank '{shelf_name}' niet gevonden")
         return False
-
-    print(f"      Plank toevoegen: shelf_id={shelf_id}, book_id={book_id}, naam='{shelf_name}'")
 
     session = _get_session()
     url = f"{CALIBREWEB_URL}/shelf/add/{shelf_id}/{book_id}"
 
     # Haal CSRF token op van de boekpagina
-    book_page = f"{CALIBREWEB_URL}/book/{book_id}"
-    csrf_token = _get_csrf_token(session, book_page)
+    csrf_token = _get_csrf_token(session, f"{CALIBREWEB_URL}/book/{book_id}")
     if not csrf_token:
-        # Fallback: probeer CSRF van hoofdpagina
         csrf_token = _get_csrf_token(session, f"{CALIBREWEB_URL}/")
 
-    if not csrf_token:
-        print(f"      ⚠ Geen CSRF token - probeer toch POST")
-    else:
-        print(f"      CSRF token verkregen ({csrf_token[:20]}...)")
-
-    # Probeer meerdere methodes om het boek toe te voegen
-    attempts = [
-        ("header+form", {"X-Requested-With": "XMLHttpRequest", "X-CSRFToken": csrf_token or ""}, {"csrf_token": csrf_token or ""}),
-        ("form-only", {"X-Requested-With": "XMLHttpRequest"}, {"csrf_token": csrf_token or ""}),
-        ("header-only", {"X-Requested-With": "XMLHttpRequest", "X-CSRFToken": csrf_token or ""}, None),
-        ("plain-post", {}, None),
-    ]
-
     try:
-        for desc, headers, data in attempts:
-            resp = session.post(url, headers=headers, data=data, timeout=10, allow_redirects=True)
-            if resp.status_code in (200, 204, 302):
-                print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (methode={desc}, status={resp.status_code})")
-                return True
-            print(f"      Poging '{desc}': status={resp.status_code}")
+        headers = {"X-Requested-With": "XMLHttpRequest", "X-CSRFToken": csrf_token or ""}
+        data = {"csrf_token": csrf_token or ""}
+        resp = session.post(url, headers=headers, data=data, timeout=10, allow_redirects=True)
 
-        print(f"      ✗ Alle pogingen mislukt voor {url}")
-        print(f"      Session cookies: {list(session.cookies.keys())}")
-        print(f"      Laatste response: {resp.text[:300]}")
+        if resp.status_code in (200, 204, 302):
+            return True
+
+        print(f"      ✗ Plank toevoegen mislukt: status={resp.status_code}")
         return False
 
     except requests.RequestException as e:
-        print(f"      ✗ HTTP fout bij plank toevoegen: {e}")
+        print(f"      ✗ Plank toevoegen mislukt: {e}")
         _invalidate_session()
         return False

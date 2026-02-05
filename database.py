@@ -190,12 +190,12 @@ def add_wishlist_item(author: str, title: str, added_via: str = "web",
         )
         item_id = cursor.lastrowid
 
-        # BELANGRIJK: Gebruik dezelfde connectie voor log!
-        conn.execute(
-            """INSERT INTO logs (wishlist_id, level, message)
-               VALUES (?, ?, ?)""",
-            (item_id, "info", f"Item toegevoegd via {added_via}")
-        )
+        if is_logging_enabled():
+            conn.execute(
+                """INSERT INTO logs (wishlist_id, level, message)
+                   VALUES (?, ?, ?)""",
+                (item_id, "info", f"Item toegevoegd via {added_via}")
+            )
 
         return item_id
 
@@ -243,16 +243,16 @@ def update_wishlist_status(
             (status, now, nzb_url, error_message, item_id)
         )
 
-        log_msg = f"Status: {status}"
-        if error_message:
-            log_msg += f" - {error_message}"
+        if is_logging_enabled():
+            log_msg = f"Status: {status}"
+            if error_message:
+                log_msg += f" - {error_message}"
 
-        # BELANGRIJK: Gebruik dezelfde connectie voor log!
-        conn.execute(
-            """INSERT INTO logs (wishlist_id, level, message)
-               VALUES (?, ?, ?)""",
-            (item_id, "info", log_msg)
-        )
+            conn.execute(
+                """INSERT INTO logs (wishlist_id, level, message)
+                   VALUES (?, ?, ?)""",
+                (item_id, "info", log_msg)
+            )
 
 
 def delete_wishlist_item(item_id: int) -> bool:
@@ -289,12 +289,20 @@ def bulk_delete_by_status(status: str) -> int:
 
 # ===== LOGS =====
 
+def is_logging_enabled() -> bool:
+    """Check of logging is ingeschakeld."""
+    return get_setting('logging_enabled', 'true') == 'true'
+
+
 def add_log(
     wishlist_id: Optional[int],
     level: str,
     message: str
 ) -> None:
-    """Voeg log entry toe."""
+    """Voeg log entry toe. Respecteert logging instelling (errors altijd)."""
+    if level != 'error' and not is_logging_enabled():
+        return
+
     with get_db() as conn:
         conn.execute(
             """INSERT INTO logs (wishlist_id, level, message)

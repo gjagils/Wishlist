@@ -320,6 +320,30 @@ def api_get_shelves():
         })
 
 
+@app.route('/api/settings', methods=['GET'])
+@requires_auth
+def api_get_settings():
+    """Haal alle instellingen op."""
+    settings = {
+        'logging_enabled': db.get_setting('logging_enabled', 'true') == 'true',
+    }
+    return jsonify(settings)
+
+
+@app.route('/api/settings', methods=['PUT'])
+@requires_auth
+def api_update_settings():
+    """Update instellingen."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Geen data ontvangen'}), 400
+
+    if 'logging_enabled' in data:
+        db.set_setting('logging_enabled', 'true' if data['logging_enabled'] else 'false')
+
+    return jsonify({'message': 'Instellingen opgeslagen'})
+
+
 @app.route('/api/health', methods=['GET'])
 def api_health():
     """Health check endpoint (geen auth nodig)."""

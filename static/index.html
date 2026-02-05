@@ -13,7 +13,10 @@
         <header class="header">
             <div class="header-title">
                 <h1>📚 Wishlist: Boekjes van Gerd-Jan</h1>
-                <a href="http://boekjes.gerdjan.nl" class="nav-link" target="_blank">← Terug naar Bibliotheek</a>
+                <div class="header-buttons">
+                    <button class="btn btn-settings" onclick="toggleSettings()" title="Instellingen">Instellingen</button>
+                    <a href="http://boekjes.gerdjan.nl" class="nav-link" target="_blank">← Terug naar Bibliotheek</a>
+                </div>
             </div>
             <div class="header-stats">
                 <span class="stat" id="stat-total">Totaal: <strong>0</strong></span>
@@ -25,6 +28,21 @@
                 <span class="stat stat-failed" id="stat-failed">Mislukt: <strong>0</strong></span>
             </div>
         </header>
+
+        <!-- Settings Panel -->
+        <div id="settings-panel" class="card settings-panel" style="display:none">
+            <h2>Instellingen</h2>
+            <div class="setting-row">
+                <div class="setting-info">
+                    <strong>Logging</strong>
+                    <p>Sla activiteit bij in de database en toon in Recente Activiteit</p>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="setting-logging" onchange="saveSetting('logging_enabled', this.checked)">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
 
         <!-- Add Item Form -->
         <div class="card add-form">
