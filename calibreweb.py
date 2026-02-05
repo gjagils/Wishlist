@@ -200,87 +200,90 @@ def _get_shelf_id(shelf_name: str) -> Optional[int]:
     return None
 
 
+def _opds_search(query: str) -> Optional[list]:
+    """
+    Voer een OPDS zoekopdracht uit en return entries of None.
+    Gebruikt Basic Auth (OPDS accepteert geen session cookies).
+    """
+    from lxml import etree
+
+    opds_url = f"{CALIBREWEB_URL}/opds/search"
+
+    try:
+        resp = requests.get(
+            opds_url,
+            params={"query": query},
+            auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"      OPDS request mislukt: {e}")
+        return None
+
+    # Check of we XML terugkrijgen
+    content_type = resp.headers.get("content-type", "")
+    if "html" in content_type:
+        print(f"      OPDS gaf HTML terug i.p.v. XML (auth probleem?)")
+        return None
+
+    try:
+        root = etree.fromstring(resp.content)
+    except Exception as e:
+        print(f"      OPDS XML parse fout: {e}")
+        return None
+
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    entries = root.findall("atom:entry", ns)
+    if not entries:
+        entries = root.findall("entry")
+
+    return entries if entries else None
+
+
 def search_book(author: str, title: str) -> Optional[int]:
     """
     Zoek een boek in Calibre-Web via de OPDS feed.
+    Probeert meerdere zoekstrategieën: titel, auteur+titel, auteur.
 
     Returns: book_id als gevonden, anders None
     """
     if not is_configured():
         return None
 
-    from lxml import etree
+    # Probeer meerdere queries - Calibre-Web OPDS zoekt soms alleen op één veld
+    queries = [title, f"{author} {title}", author]
+    # Verwijder duplicaten met behoud van volgorde
+    seen = set()
+    unique_queries = []
+    for q in queries:
+        q = q.strip()
+        if q and q not in seen:
+            seen.add(q)
+            unique_queries.append(q)
 
-    query = f"{author} {title}"
-    print(f"      OPDS zoekquery: '{query}'")
-
-    opds_url = f"{CALIBREWEB_URL}/opds/search"
-
-    # Probeer eerst met sessie-auth (werkt altijd via reverse proxy),
-    # dan fallback naar Basic Auth
-    resp = None
-    for attempt, method in enumerate(["session", "basic"], 1):
-        try:
-            if method == "session":
-                session = _get_session()
-                resp = session.get(opds_url, params={"query": query}, timeout=15)
-            else:
-                resp = requests.get(
-                    opds_url,
-                    params={"query": query},
-                    auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
-                    timeout=15,
-                )
-            resp.raise_for_status()
-
-            # Check of we XML terugkrijgen (niet een HTML login pagina)
-            content_type = resp.headers.get("content-type", "")
-            if "html" in content_type:
-                print(f"      OPDS poging {attempt} ({method}): kreeg HTML terug i.p.v. XML")
-                if method == "session":
-                    _invalidate_session()
-                resp = None
-                continue
+    entries = None
+    used_query = None
+    for query in unique_queries:
+        print(f"      OPDS zoekquery: '{query}'")
+        entries = _opds_search(query)
+        if entries:
+            used_query = query
+            print(f"      {len(entries)} OPDS resultaat(en) gevonden")
             break
-        except Exception as e:
-            print(f"      OPDS poging {attempt} ({method}) mislukt: {e}")
-            if method == "session":
-                _invalidate_session()
-            continue
-
-    if resp is None:
-        print(f"      OPDS zoeken volledig mislukt voor '{query}'")
-        return None
-
-    # Parse Atom XML
-    try:
-        root = etree.fromstring(resp.content)
-    except Exception as e:
-        print(f"      OPDS XML parse fout: {e}")
-        print(f"      Response content-type: {resp.headers.get('content-type', '?')}")
-        print(f"      Response begin: {resp.text[:200]}")
-        return None
-
-    # Atom namespace
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
-    entries = root.findall("atom:entry", ns)
-
-    # Probeer ook zonder namespace (sommige Calibre-Web versies)
-    if not entries:
-        entries = root.findall("entry")
+        print(f"      Geen resultaten")
 
     if not entries:
-        # Toon wat we wel kregen voor diagnose
-        children = [child.tag.split("}")[-1] if "}" in child.tag else child.tag for child in root]
-        print(f"      Geen OPDS resultaten voor '{query}' (root elementen: {children[:5]})")
+        print(f"      Geen OPDS resultaten na {len(unique_queries)} pogingen")
         return None
 
-    print(f"      {len(entries)} OPDS resultaat(en) gevonden")
-
+    # Match entries tegen auteur en titel
     author_lower = author.lower()
     title_lower = title.lower()
     author_parts = [p.strip() for p in author_lower.split() if len(p.strip()) > 2]
     title_parts = [p.strip() for p in title_lower.split() if len(p.strip()) > 2]
+
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
 
     for entry in entries:
         entry_title_el = entry.find("atom:title", ns)
