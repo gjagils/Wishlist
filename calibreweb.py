@@ -336,24 +336,42 @@ def _get_csrf_token(session: requests.Session, page_url: str) -> Optional[str]:
     try:
         resp = session.get(page_url, timeout=10)
         resp.raise_for_status()
-        # Zoek csrf_token in hidden form field of meta tag
+
+        # Patroon 1: <input name="csrf_token" ... value="xxx">
         csrf_match = re.search(
-            r'name=["\']csrf_token["\']\s+value=["\']([^"\']+)["\']',
+            r'name=["\']csrf_token["\'][^>]*value=["\']([^"\']+)["\']',
             resp.text
         )
+        # Patroon 2: <input value="xxx" ... name="csrf_token">
         if not csrf_match:
             csrf_match = re.search(
-                r'value=["\']([^"\']+)["\']\s+[^>]*name=["\']csrf_token["\']',
+                r'value=["\']([^"\']+)["\'][^>]*name=["\']csrf_token["\']',
                 resp.text
             )
+        # Patroon 3: <meta name="csrf-token" content="xxx">
         if not csrf_match:
-            # Zoek in meta tag
             csrf_match = re.search(
-                r'<meta\s+name=["\']csrf-token["\']\s+content=["\']([^"\']+)["\']',
+                r'<meta\s+[^>]*name=["\']csrf-token["\'][^>]*content=["\']([^"\']+)["\']',
                 resp.text
             )
-        return csrf_match.group(1) if csrf_match else None
-    except requests.RequestException:
+        # Patroon 4: csrf_token in JavaScript variable
+        if not csrf_match:
+            csrf_match = re.search(
+                r'csrf_token\s*[=:]\s*["\']([^"\']+)["\']',
+                resp.text
+            )
+
+        if csrf_match:
+            return csrf_match.group(1)
+
+        # Fallback: check csrf_token cookie
+        if "csrf_token" in session.cookies:
+            return session.cookies["csrf_token"]
+
+        print(f"      Geen CSRF token gevonden op {page_url} (pagina={len(resp.text)} bytes, url={resp.url})")
+        return None
+    except requests.RequestException as e:
+        print(f"      CSRF ophalen mislukt: {e}")
         return None
 
 
@@ -381,34 +399,30 @@ def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
         # Fallback: probeer CSRF van hoofdpagina
         csrf_token = _get_csrf_token(session, f"{CALIBREWEB_URL}/")
 
+    if not csrf_token:
+        print(f"      ⚠ Geen CSRF token - probeer toch POST")
+    else:
+        print(f"      CSRF token verkregen ({csrf_token[:20]}...)")
+
+    # Probeer meerdere methodes om het boek toe te voegen
+    attempts = [
+        ("header+form", {"X-Requested-With": "XMLHttpRequest", "X-CSRFToken": csrf_token or ""}, {"csrf_token": csrf_token or ""}),
+        ("form-only", {"X-Requested-With": "XMLHttpRequest"}, {"csrf_token": csrf_token or ""}),
+        ("header-only", {"X-Requested-With": "XMLHttpRequest", "X-CSRFToken": csrf_token or ""}, None),
+        ("plain-post", {}, None),
+    ]
+
     try:
-        headers = {"X-Requested-With": "XMLHttpRequest"}
-        if csrf_token:
-            headers["X-CSRFToken"] = csrf_token
-            print(f"      CSRF token verkregen")
-
-        resp = session.post(url, headers=headers, timeout=10, allow_redirects=True)
-
-        if resp.status_code in (200, 302):
-            print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (status={resp.status_code})")
-            return True
-
-        # Als 400 met CSRF header, probeer als form data
-        if resp.status_code == 400 and csrf_token:
-            print(f"      CSRF via header mislukt, probeer form data...")
-            resp = session.post(
-                url,
-                data={"csrf_token": csrf_token},
-                headers={"X-Requested-With": "XMLHttpRequest"},
-                timeout=10,
-                allow_redirects=True,
-            )
+        for desc, headers, data in attempts:
+            resp = session.post(url, headers=headers, data=data, timeout=10, allow_redirects=True)
             if resp.status_code in (200, 302):
-                print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (status={resp.status_code})")
+                print(f"      ✓ Boek {book_id} toegevoegd aan plank '{shelf_name}' (methode={desc}, status={resp.status_code})")
                 return True
+            print(f"      Poging '{desc}': status={resp.status_code}")
 
-        print(f"      ✗ Onverwachte response: status={resp.status_code}, url={url}")
-        print(f"      Response body: {resp.text[:200]}")
+        print(f"      ✗ Alle pogingen mislukt voor {url}")
+        print(f"      Session cookies: {list(session.cookies.keys())}")
+        print(f"      Laatste response: {resp.text[:300]}")
         return False
 
     except requests.RequestException as e:
