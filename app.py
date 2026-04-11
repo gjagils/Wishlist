@@ -84,12 +84,20 @@ def login():
 
     # Probeer authenticatie via Calibre-Web
     authenticated = False
+    auth_method = "none"
     if calibreweb.is_configured():
         authenticated = calibreweb.authenticate_user(username, password)
+        auth_method = "calibreweb"
     else:
         # Fallback: legacy single-user auth
         authenticated = (username == LEGACY_USERNAME and
                         check_password_hash(LEGACY_PASSWORD_HASH, password))
+        auth_method = "legacy"
+
+    print(f"[LOGIN] user='{username}', method={auth_method}, "
+          f"calibreweb_configured={calibreweb.is_configured()}, "
+          f"calibreweb_url='{calibreweb.CALIBREWEB_URL}', "
+          f"authenticated={authenticated}")
 
     if not authenticated:
         return jsonify({'error': 'Ongeldige gebruikersnaam of wachtwoord'}), 401

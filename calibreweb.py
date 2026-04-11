@@ -85,12 +85,14 @@ def authenticate_user(username: str, password: str) -> bool:
     Slaat de sessie NIET op — dit is alleen een auth-check.
     """
     if not CALIBREWEB_URL:
+        print(f"[AUTH] CALIBREWEB_URL niet geconfigureerd")
         return False
 
     session = requests.Session()
     login_url = f"{CALIBREWEB_URL}/login"
 
     try:
+        print(f"[AUTH] Authenticatie poging voor '{username}' via {login_url}")
         resp = session.get(login_url, timeout=10)
         resp.raise_for_status()
 
@@ -98,6 +100,15 @@ def authenticate_user(username: str, password: str) -> bool:
             r'name=["\']csrf_token["\'][^>]*value=["\']([^"\']+)["\']',
             resp.text
         )
+
+        # Probeer ook alternatief CSRF patroon (value voor name)
+        if not csrf_match:
+            csrf_match = re.search(
+                r'value=["\']([^"\']+)["\'][^>]*name=["\']csrf_token["\']',
+                resp.text
+            )
+
+        print(f"[AUTH] CSRF token gevonden: {bool(csrf_match)}")
 
         login_data = {
             "username": username,
@@ -112,10 +123,34 @@ def authenticate_user(username: str, password: str) -> bool:
 
         resp = session.post(login_url, data=login_data, timeout=10, allow_redirects=True)
 
-        # Login geslaagd als we niet meer op /login pagina staan
-        return "/login" not in resp.url or "login" not in resp.text.lower()
+        # Check meerdere indicatoren of login geslaagd is:
+        # 1. Niet meer op /login pagina (URL check)
+        final_path = resp.url.split("?")[0]  # Strip query params
+        on_login_page = final_path.rstrip("/").endswith("/login")
 
-    except requests.RequestException:
+        # 2. Bevat de response een login formulier? (HTML check)
+        has_login_form = bool(re.search(
+            r'<form[^>]*action=["\'][^"\']*login["\']', resp.text, re.IGNORECASE
+        ))
+
+        # 3. Check voor "flash" foutmeldingen van Calibre-Web
+        has_error_flash = bool(re.search(
+            r'class=["\'][^"\']*alert[^"\']*danger|invalid|wrong password|incorrect',
+            resp.text, re.IGNORECASE
+        ))
+
+        success = not on_login_page and not has_error_flash
+        # Fallback: als URL niet betrouwbaar is (reverse proxy), check HTML
+        if on_login_page and not has_login_form and not has_error_flash:
+            success = True  # URL zegt /login maar er is geen login form meer
+
+        print(f"[AUTH] Resultaat: url={resp.url}, on_login={on_login_page}, "
+              f"has_form={has_login_form}, has_error={has_error_flash}, success={success}")
+
+        return success
+
+    except requests.RequestException as e:
+        print(f"[AUTH] Fout bij authenticatie: {e}")
         return False
 
 
