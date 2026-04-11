@@ -13,61 +13,44 @@ services:
       - /volume1/docker/wishlist/data:/data
 
     environment:
-      # === VERPLICHT: Spotweb configuratie ===
-      - SPOTWEB_BASE_URL=http://your-spotweb-url
-      - SPOTWEB_APIKEY=your-spotweb-api-key
+      # === VERPLICHT ===
+      - SPOTWEB_BASE_URL=${SPOTWEB_BASE_URL}
+      - SPOTWEB_APIKEY=${SPOTWEB_APIKEY}
+      - SAB_BASE_URL=${SAB_BASE_URL}
+      - SAB_APIKEY=${SAB_APIKEY}
 
-      # === VERPLICHT: SABnzbd configuratie ===
-      - SAB_BASE_URL=http://your-sabnzbd-url:8080
-      - SAB_APIKEY=your-sabnzbd-api-key
-
-      # === OPTIONEEL: SABnzbd categorie ===
-      - SAB_CATEGORY=books
-      - SPOTWEB_CAT=7020
-
-      # === OPTIONEEL: Web UI credentials ===
-      - WEB_USERNAME=admin
-      - WEB_PASSWORD=wishlist
-      - SECRET_KEY=change-this-to-random-string
-
-      # === OPTIONEEL: Email monitoring (Gmail) ===
-      # Laat leeg om email monitoring uit te schakelen
-      - EMAIL_ADDRESS=
-      - EMAIL_PASSWORD=
-      - EMAIL_IMAP_SERVER=imap.gmail.com
-      - EMAIL_IMAP_PORT=993
-      - EMAIL_CHECK_INTERVAL=300
-
-      # Optioneel: whitelist van toegestane email senders (comma separated)
-      # Laat leeg om alle senders toe te staan
-      - EMAIL_ALLOWED_SENDERS=
-
-      # === OPTIONEEL: Calibre-Web integratie (boekenplanken) ===
-      # Laat leeg om boekenplanken uit te schakelen
-      - CALIBREWEB_URL=
-      - CALIBREWEB_USERNAME=
-      - CALIBREWEB_PASSWORD=
-
-      # === OPTIONEEL: SMTP e-mail notificaties ===
-      # Laat leeg om e-mail notificaties uit te schakelen
-      - SMTP_SERVER=smtp.gmail.com
-      - SMTP_PORT=587
-      - SMTP_USERNAME=
-      - SMTP_PASSWORD=
-      - SMTP_FROM=
-
-      # === OPTIONEEL: Worker interval ===
-      - INTERVAL_SECONDS=900
-
-      # === OPTIONEEL: Database pad ===
-      - DB_PATH=/data/wishlist.db
-
-      # === OPTIONEEL: Flask configuratie ===
+      # === OPTIONEEL ===
+      - SAB_CATEGORY=${SAB_CATEGORY:-books}
+      - SPOTWEB_CAT=${SPOTWEB_CAT:-7020}
+      - WEB_USERNAME=${WEB_USERNAME:-admin}
+      - SECRET_KEY=${SECRET_KEY:-change-me}
+      - INTERVAL_SECONDS=${INTERVAL_SECONDS:-900}
+      - DB_PATH=${DB_PATH:-/data/wishlist.db}
       - FLASK_HOST=0.0.0.0
       - FLASK_PORT=5000
       - FLASK_DEBUG=false
+      - PYTHONUNBUFFERED=1
 
-    # Health check
+      # === Email monitoring ===
+      - EMAIL_ADDRESS=${EMAIL_ADDRESS:-}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD:-}
+      - EMAIL_IMAP_SERVER=${EMAIL_IMAP_SERVER:-imap.gmail.com}
+      - EMAIL_IMAP_PORT=${EMAIL_IMAP_PORT:-993}
+      - EMAIL_CHECK_INTERVAL=${EMAIL_CHECK_INTERVAL:-300}
+      - EMAIL_ALLOWED_SENDERS=${EMAIL_ALLOWED_SENDERS:-}
+
+      # === Calibre-Web ===
+      - CALIBREWEB_URL=${CALIBREWEB_URL:-}
+      - CALIBREWEB_USERNAME=${CALIBREWEB_USERNAME:-}
+      - CALIBREWEB_PASSWORD=${CALIBREWEB_PASSWORD:-}
+
+      # === SMTP ===
+      - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
+
     healthcheck:
       test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:5000/api/health', timeout=5)"]
       interval: 30s
