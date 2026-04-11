@@ -58,26 +58,28 @@ body {
 }
 
 .sidebar-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
     padding: 0 8px;
     margin-bottom: 32px;
 }
 
-.brand-icon { width: 36px; height: 36px; }
-
-.brand-name {
-    font-family: var(--font-heading);
-    font-weight: 700;
-    font-size: 1.1rem;
-    color: var(--neutral-900);
+.brand-logo {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
 }
 
-.brand-sub {
-    font-size: 0.75rem;
-    color: var(--neutral-500);
-    font-weight: 500;
+.brand-wishlist {
+    font-family: 'Pacifico', cursive;
+    font-size: 0.95rem;
+    color: var(--tertiary);
+    line-height: 1.2;
+}
+
+.brand-name {
+    font-family: 'Pacifico', cursive;
+    font-size: 1.4rem;
+    color: var(--primary);
+    line-height: 1.2;
 }
 
 .sidebar-nav {
@@ -145,12 +147,23 @@ body {
     z-index: 90;
 }
 
-.mobile-title {
-    font-family: var(--font-heading);
-    font-size: 1.1rem;
-    font-weight: 700;
-    color: var(--neutral-900);
+.mobile-brand {
+    display: flex;
+    flex-direction: column;
     flex: 1;
+    line-height: 1.1;
+}
+
+.brand-wishlist-sm {
+    font-family: 'Pacifico', cursive;
+    font-size: 0.65rem;
+    color: var(--tertiary);
+}
+
+.brand-name-sm {
+    font-family: 'Pacifico', cursive;
+    font-size: 1.05rem;
+    color: var(--primary);
 }
 
 .menu-toggle, .icon-btn {
