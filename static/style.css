@@ -520,15 +520,40 @@ body {
 }
 
 .book-cover-placeholder {
-    font-size: 3rem;
-    opacity: 0.4;
-    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
     transition: opacity 0.3s;
 }
 
-.book-cover-placeholder svg {
-    width: 64px;
-    height: 64px;
+.generated-cover {
+    padding: 24px 20px;
+    text-align: center;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.generated-title {
+    font-family: var(--font-heading);
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--neutral-700);
+    line-height: 1.3;
+    margin-bottom: 8px;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.generated-author {
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--neutral-500);
+    opacity: 0.8;
 }
 
 /* Cover image transition */

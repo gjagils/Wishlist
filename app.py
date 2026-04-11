@@ -421,24 +421,58 @@ def api_update_status(item_id: int):
 @app.route('/api/cover/<int:item_id>', methods=['GET'])
 @requires_auth
 def api_get_cover(item_id: int):
-    """Haal boekcover URL op via Open Library. Resultaat wordt gecached."""
+    """Haal boekcover URL op. Fallback chain: Google Books → Open Library."""
     item = db.get_wishlist_item(item_id)
     if not item:
         return jsonify({'cover_url': None}), 404
 
-    # Check cache eerst
+    # Check cache eerst (skip lege cache = opnieuw zoeken met nieuwe providers)
     cache_key = f"cover_{item_id}"
     cached = db.get_setting(cache_key)
-    if cached is not None:
-        return jsonify({'cover_url': cached if cached != '' else None})
+    if cached is not None and cached != '':
+        return jsonify({'cover_url': cached})
 
-    # Zoek in Open Library
-    cover_url = _fetch_openlibrary_cover(item['author'], item['title'])
+    # Fallback chain
+    cover_url = (
+        _fetch_google_books_cover(item['author'], item['title']) or
+        _fetch_openlibrary_cover(item['author'], item['title'])
+    )
 
     # Cache resultaat (ook lege string = "niet gevonden")
     db.set_setting(cache_key, cover_url or '')
 
     return jsonify({'cover_url': cover_url})
+
+
+def _fetch_google_books_cover(author: str, title: str) -> str | None:
+    """Zoek boekcover via Google Books API (gratis, geen auth)."""
+    import requests as req
+    import urllib.parse
+
+    query = urllib.parse.quote(f"{title} {author}")
+    try:
+        url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=3&fields=items(volumeInfo/imageLinks)"
+        resp = req.get(url, timeout=8)
+        if resp.status_code != 200:
+            return None
+
+        data = resp.json()
+        for item in data.get("items", []):
+            links = item.get("volumeInfo", {}).get("imageLinks", {})
+            # Prefer thumbnail, upgrade to larger size
+            cover = links.get("thumbnail") or links.get("smallThumbnail")
+            if cover:
+                # Google Books geeft http URL, upgrade naar https
+                # en verwijder edge=curl parameter voor schonere afbeelding
+                cover = cover.replace("http://", "https://")
+                cover = cover.replace("&edge=curl", "")
+                # Upgrade zoom level voor hogere resolutie
+                cover = cover.replace("zoom=1", "zoom=2")
+                return cover
+    except Exception:
+        pass
+
+    return None
 
 
 def _fetch_openlibrary_cover(author: str, title: str) -> str | None:

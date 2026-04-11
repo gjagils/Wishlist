@@ -351,7 +351,10 @@ function renderWishlist() {
         <div class="book-card">
             <div class="book-cover" data-item-id="${item.id}" style="background: ${gradient}">
                 <div class="book-cover-placeholder">
-                    <svg viewBox="0 0 64 64" fill="none"><rect x="12" y="8" width="40" height="48" rx="4" fill="currentColor" opacity="0.15"/><rect x="16" y="12" width="32" height="40" rx="2" fill="white" opacity="0.5"/><line x1="22" y1="22" x2="42" y2="22" stroke="currentColor" stroke-width="2" opacity="0.2"/><line x1="22" y1="28" x2="42" y2="28" stroke="currentColor" stroke-width="2" opacity="0.2"/><line x1="22" y1="34" x2="36" y2="34" stroke="currentColor" stroke-width="2" opacity="0.2"/></svg>
+                    <div class="generated-cover">
+                        <div class="generated-title">${escapeHtml(item.title)}</div>
+                        <div class="generated-author">${escapeHtml(item.author)}</div>
+                    </div>
                 </div>
                 <span class="status-pill status-${item.status}">${getStatusText(item.status)}</span>
             </div>
