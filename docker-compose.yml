@@ -3,14 +3,14 @@ version: '3.8'
 services:
   wishlist:
     image: ghcr.io/gjagils/wishlist:latest
-    container_name: wishlist-manager
+    container_name: wishlist
     restart: unless-stopped
 
     ports:
       - "6754:5000"
 
     volumes:
-      - ./data:/data
+      - /volume1/docker/wishlist/data:/data
 
     environment:
       # === VERPLICHT: Spotweb configuratie ===
