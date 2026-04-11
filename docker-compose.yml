@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
 
     ports:
-      - "5000:5000"
+      - "6754:5000"
 
     volumes:
       - ./data:/data
