@@ -510,11 +510,17 @@ body {
     font-size: 3rem;
     opacity: 0.4;
     color: var(--primary);
+    transition: opacity 0.3s;
 }
 
 .book-cover-placeholder svg {
     width: 64px;
     height: 64px;
+}
+
+/* Cover image transition */
+.book-cover {
+    transition: background 0.3s ease;
 }
 
 .status-pill {

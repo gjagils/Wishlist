@@ -410,6 +410,60 @@ def api_update_status(item_id: int):
     return jsonify({'message': 'Status bijgewerkt'}), 200
 
 
+@app.route('/api/cover/<int:item_id>', methods=['GET'])
+@requires_auth
+def api_get_cover(item_id: int):
+    """Haal boekcover URL op via Open Library. Resultaat wordt gecached."""
+    item = db.get_wishlist_item(item_id)
+    if not item:
+        return jsonify({'cover_url': None}), 404
+
+    # Check cache eerst
+    cache_key = f"cover_{item_id}"
+    cached = db.get_setting(cache_key)
+    if cached is not None:
+        return jsonify({'cover_url': cached if cached != '' else None})
+
+    # Zoek in Open Library
+    cover_url = _fetch_openlibrary_cover(item['author'], item['title'])
+
+    # Cache resultaat (ook lege string = "niet gevonden")
+    db.set_setting(cache_key, cover_url or '')
+
+    return jsonify({'cover_url': cover_url})
+
+
+def _fetch_openlibrary_cover(author: str, title: str) -> str | None:
+    """Zoek boekcover via Open Library Search API."""
+    import requests as req
+    import urllib.parse
+
+    queries = [
+        f"title={urllib.parse.quote(title)}&author={urllib.parse.quote(author)}",
+        f"title={urllib.parse.quote(title)}",
+    ]
+
+    for query in queries:
+        try:
+            url = f"https://openlibrary.org/search.json?{query}&limit=3&fields=cover_i,title,author_name"
+            resp = req.get(url, timeout=8)
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            docs = data.get("docs", [])
+
+            for doc in docs:
+                cover_id = doc.get("cover_i")
+                if cover_id:
+                    return f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
+
+        except Exception:
+            continue
+
+    return None
+
+
 @app.route('/api/logs', methods=['GET'])
 @requires_auth
 def api_get_logs():
