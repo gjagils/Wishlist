@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   wishlist:
-    build: .
+    image: ghcr.io/gjagils/wishlist:latest
     container_name: wishlist-manager
     restart: unless-stopped
 
@@ -47,6 +47,14 @@ services:
       - CALIBREWEB_URL=
       - CALIBREWEB_USERNAME=
       - CALIBREWEB_PASSWORD=
+
+      # === OPTIONEEL: SMTP e-mail notificaties ===
+      # Laat leeg om e-mail notificaties uit te schakelen
+      - SMTP_SERVER=smtp.gmail.com
+      - SMTP_PORT=587
+      - SMTP_USERNAME=
+      - SMTP_PASSWORD=
+      - SMTP_FROM=
 
       # === OPTIONEEL: Worker interval ===
       - INTERVAL_SECONDS=900

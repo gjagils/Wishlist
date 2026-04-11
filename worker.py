@@ -13,6 +13,7 @@ from typing import List, Optional, Set
 
 import database as db
 import calibreweb
+import email_sender
 
 # Config via environment
 SPOTWEB_BASE_URL = os.environ["SPOTWEB_BASE_URL"].rstrip("/")
@@ -238,6 +239,12 @@ def process_item(item: dict) -> None:
                 )
                 db.add_log(item_id, "info", "✓ Toegevoegd aan SABnzbd")
 
+            # E-mail notificatie
+            try:
+                email_sender.notify_item_found(item)
+            except Exception as e:
+                db.add_log(item_id, "warning", f"E-mail notificatie mislukt: {e}")
+
         else:
             db.update_wishlist_status(
                 item_id,
@@ -289,6 +296,11 @@ def check_importing_items() -> None:
             if success:
                 db.update_wishlist_status(item_id, "shelved")
                 db.add_log(item_id, "info", f"✓ Op boekenplank gezet: {shelf_name} (book_id={book_id})")
+
+                try:
+                    email_sender.notify_item_shelved(item)
+                except Exception as e:
+                    db.add_log(item_id, "warning", f"E-mail notificatie mislukt: {e}")
             else:
                 db.add_log(item_id, "warning", f"Boek gevonden (book_id={book_id}) maar plank toevoegen mislukt")
 

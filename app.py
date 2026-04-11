@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Flask web applicatie voor Wishlist beheer.
-Biedt web UI en REST API met basic authentication.
+Biedt web UI en REST API met sessie-authenticatie via Calibre-Web.
 """
+import json
 import os
 import re
 import threading
 from functools import wraps
-from flask import Flask, request, jsonify, render_template_string, send_from_directory
+from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import database as db
@@ -16,32 +17,105 @@ import calibreweb
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
-# Authenticatie configuratie
-USERNAME = os.environ.get('WEB_USERNAME', 'admin')
-PASSWORD_HASH = generate_password_hash(os.environ.get('WEB_PASSWORD', 'wishlist'))
+# Legacy single-user credentials (fallback als Calibre-Web niet geconfigureerd is)
+LEGACY_USERNAME = os.environ.get('WEB_USERNAME', 'admin')
+LEGACY_PASSWORD_HASH = generate_password_hash(os.environ.get('WEB_PASSWORD', 'wishlist'))
 
 
-def check_auth(username: str, password: str) -> bool:
-    """Controleer gebruikersnaam en wachtwoord."""
-    return username == USERNAME and check_password_hash(PASSWORD_HASH, password)
-
-
-def authenticate():
-    """Stuur 401 response voor authenticatie."""
-    return jsonify({'error': 'Authenticatie vereist'}), 401, {
-        'WWW-Authenticate': 'Basic realm="Wishlist"'
-    }
+def get_current_user():
+    """Haal huidige ingelogde user op uit sessie."""
+    username = session.get('username')
+    if not username:
+        return None
+    return db.get_user(username)
 
 
 def requires_auth(f):
     """Decorator voor endpoints die authenticatie vereisen."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        auth = request.authorization
-        if not auth or not check_auth(auth.username, auth.password):
-            return authenticate()
+        if session.get('username'):
+            return f(*args, **kwargs)
+
+        # Check of het een API call is
+        is_api = (request.path.startswith('/api/') or
+                  request.headers.get('Accept') == 'application/json' or
+                  request.headers.get('X-Requested-With') == 'XMLHttpRequest')
+
+        if is_api:
+            return jsonify({'error': 'Authenticatie vereist'}), 401
+
+        return redirect(url_for('login'))
+    return decorated
+
+
+def requires_admin(f):
+    """Decorator voor admin-only endpoints."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        user = get_current_user()
+        if not user or user['role'] != 'admin':
+            return jsonify({'error': 'Admin rechten vereist'}), 403
         return f(*args, **kwargs)
     return decorated
+
+
+# ===== AUTH ROUTES =====
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login pagina en authenticatie."""
+    if request.method == 'GET':
+        if session.get('username'):
+            return redirect('/')
+        return send_from_directory('static', 'login.html')
+
+    # POST: authenticeer
+    data = request.get_json() if request.is_json else None
+    if data:
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+    else:
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+
+    if not username or not password:
+        return jsonify({'error': 'Gebruikersnaam en wachtwoord zijn verplicht'}), 400
+
+    # Probeer authenticatie via Calibre-Web
+    authenticated = False
+    if calibreweb.is_configured():
+        authenticated = calibreweb.authenticate_user(username, password)
+    else:
+        # Fallback: legacy single-user auth
+        authenticated = (username == LEGACY_USERNAME and
+                        check_password_hash(LEGACY_PASSWORD_HASH, password))
+
+    if not authenticated:
+        return jsonify({'error': 'Ongeldige gebruikersnaam of wachtwoord'}), 401
+
+    # Auto-registratie: maak user aan als die nog niet bestaat
+    user = db.get_user(username)
+    if not user:
+        db.create_user(username=username)
+        user = db.get_user(username)
+
+    db.update_user_login(username)
+
+    session['username'] = username
+    session.permanent = True
+
+    return jsonify({'message': 'Ingelogd', 'user': {
+        'username': user['username'],
+        'role': user['role'],
+    }})
+
+
+@app.route('/logout')
+def logout():
+    """Uitloggen."""
+    session.clear()
+    return redirect(url_for('login'))
 
 
 # ===== WEB UI =====
@@ -51,6 +125,18 @@ def requires_auth(f):
 def index():
     """Hoofdpagina met web interface."""
     response = send_from_directory('static', 'index.html')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
+@app.route('/admin')
+@requires_auth
+@requires_admin
+def admin_page():
+    """Admin pagina voor gebruikersbeheer."""
+    response = send_from_directory('static', 'admin.html')
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
@@ -71,22 +157,45 @@ def portal():
 def serve_static(path):
     """Serveer statische bestanden."""
     response = send_from_directory('static', path)
-    # Cache static files for 1 hour, but allow revalidation
     response.headers['Cache-Control'] = 'public, max-age=3600, must-revalidate'
     return response
 
 
-# ===== API ENDPOINTS =====
+# ===== API: ME =====
+
+@app.route('/api/me', methods=['GET'])
+@requires_auth
+def api_me():
+    """Haal huidige user info op."""
+    user = get_current_user()
+    return jsonify({
+        'username': user['username'],
+        'role': user['role'],
+        'email': user['email'],
+        'allowed_shelves': user['allowed_shelves'],
+    })
+
+
+# ===== API: WISHLIST =====
 
 @app.route('/api/wishlist', methods=['GET'])
 @requires_auth
 def api_get_wishlist():
-    """Haal alle wishlist items op."""
+    """Haal wishlist items op. Admin ziet alles, user ziet eigen items."""
+    user = get_current_user()
     status = request.args.get('status')
-    items = db.get_wishlist_items(status=status)
 
-    # Voeg count per status toe
-    all_items = db.get_wishlist_items()
+    if user['role'] == 'admin':
+        items = db.get_wishlist_items(status=status)
+    else:
+        items = db.get_wishlist_items(status=status, user_id=user['id'])
+
+    # Stats over zichtbare items
+    if user['role'] == 'admin':
+        all_items = db.get_wishlist_items()
+    else:
+        all_items = db.get_wishlist_items(user_id=user['id'])
+
     stats = {
         'total': len(all_items),
         'pending': len([i for i in all_items if i['status'] == 'pending']),
@@ -107,11 +216,15 @@ def api_get_wishlist():
 @requires_auth
 def api_get_wishlist_item(item_id: int):
     """Haal enkel wishlist item op."""
+    user = get_current_user()
     item = db.get_wishlist_item(item_id)
     if not item:
         return jsonify({'error': 'Item niet gevonden'}), 404
 
-    # Voeg logs toe
+    # Gewone user mag alleen eigen items zien
+    if user['role'] != 'admin' and item.get('user_id') != user['id']:
+        return jsonify({'error': 'Geen toegang'}), 403
+
     logs = db.get_logs(wishlist_id=item_id)
     item['logs'] = logs
 
@@ -122,6 +235,7 @@ def api_get_wishlist_item(item_id: int):
 @requires_auth
 def api_add_wishlist():
     """Voeg nieuw item toe aan wishlist."""
+    user = get_current_user()
     data = request.get_json()
 
     if not data:
@@ -133,12 +247,24 @@ def api_add_wishlist():
     if not author or not title:
         return jsonify({'error': 'Auteur en titel zijn verplicht'}), 400
 
+    shelf_name = data.get('shelf_name')
+
+    # Valideer plank-toegang voor gewone users
+    if user['role'] != 'admin' and shelf_name:
+        if not user['allowed_shelves'] or shelf_name not in user['allowed_shelves']:
+            return jsonify({'error': 'Je hebt geen toegang tot deze boekenplank'}), 403
+
+    # Gewone user zonder planken mag geen items toevoegen
+    if user['role'] != 'admin' and not user['allowed_shelves']:
+        return jsonify({'error': 'Je hebt nog geen boekenplank toegewezen gekregen. Vraag de beheerder.'}), 403
+
     try:
         item_id = db.add_wishlist_item(
             author=author,
             title=title,
             added_via=data.get('added_via', 'web'),
-            shelf_name=data.get('shelf_name')
+            shelf_name=shelf_name,
+            user_id=user['id']
         )
 
         item = db.get_wishlist_item(item_id)
@@ -156,7 +282,16 @@ def api_add_wishlist():
 @app.route('/api/wishlist/<int:item_id>', methods=['DELETE'])
 @requires_auth
 def api_delete_wishlist(item_id: int):
-    """Verwijder item uit wishlist."""
+    """Verwijder item uit wishlist. User kan alleen eigen items verwijderen."""
+    user = get_current_user()
+    item = db.get_wishlist_item(item_id)
+
+    if not item:
+        return jsonify({'error': 'Item niet gevonden'}), 404
+
+    if user['role'] != 'admin' and item.get('user_id') != user['id']:
+        return jsonify({'error': 'Je kunt alleen je eigen items verwijderen'}), 403
+
     deleted = db.delete_wishlist_item(item_id)
 
     if deleted:
@@ -167,8 +302,9 @@ def api_delete_wishlist(item_id: int):
 
 @app.route('/api/wishlist/bulk-delete', methods=['POST'])
 @requires_auth
+@requires_admin
 def api_bulk_delete_wishlist():
-    """Verwijder alle items met een specifieke status."""
+    """Verwijder alle items met een specifieke status (admin only)."""
     data = request.get_json()
 
     if not data or 'status' not in data:
@@ -176,7 +312,6 @@ def api_bulk_delete_wishlist():
 
     status = data['status']
 
-    # Valideer status
     valid_statuses = ['pending', 'searching', 'found', 'importing', 'shelved', 'failed']
     if status not in valid_statuses:
         return jsonify({'error': f'Ongeldige status. Gebruik: {", ".join(valid_statuses)}'}), 400
@@ -195,9 +330,13 @@ def api_bulk_delete_wishlist():
 @requires_auth
 def api_retry_search(item_id: int):
     """Zet item terug naar pending zodat worker opnieuw zoekt."""
+    user = get_current_user()
     item = db.get_wishlist_item(item_id)
     if not item:
         return jsonify({'error': 'Item niet gevonden'}), 404
+
+    if user['role'] != 'admin' and item.get('user_id') != user['id']:
+        return jsonify({'error': 'Geen toegang'}), 403
 
     db.update_wishlist_status(item_id, 'pending', error_message=None)
     db.add_log(item_id, 'info', 'Handmatig opnieuw zoeken gestart')
@@ -249,8 +388,9 @@ def api_start_search():
 
 @app.route('/api/wishlist/<int:item_id>/status', methods=['PUT'])
 @requires_auth
+@requires_admin
 def api_update_status(item_id: int):
-    """Update status van wishlist item (voor worker)."""
+    """Update status van wishlist item (admin only)."""
     data = request.get_json()
 
     if not data or 'status' not in data:
@@ -305,12 +445,20 @@ def api_get_stats():
 @app.route('/api/shelves', methods=['GET'])
 @requires_auth
 def api_get_shelves():
-    """Haal boekenplanken op uit Calibre-Web."""
+    """Haal boekenplanken op. Admin ziet alles, user ziet alleen toegewezen planken."""
     if not calibreweb.is_configured():
         return jsonify({'shelves': [], 'configured': False})
 
     try:
-        shelves = calibreweb.fetch_shelves()
+        all_shelves = calibreweb.fetch_shelves()
+
+        user = get_current_user()
+        if user['role'] != 'admin' and user['allowed_shelves']:
+            # Filter planken voor gewone users
+            shelves = [s for s in all_shelves if s['name'] in user['allowed_shelves']]
+        else:
+            shelves = all_shelves
+
         return jsonify({'shelves': shelves, 'configured': True})
     except Exception as e:
         return jsonify({
@@ -332,8 +480,9 @@ def api_get_settings():
 
 @app.route('/api/settings', methods=['PUT'])
 @requires_auth
+@requires_admin
 def api_update_settings():
-    """Update instellingen."""
+    """Update instellingen (admin only)."""
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Geen data ontvangen'}), 400
@@ -342,6 +491,59 @@ def api_update_settings():
         db.set_setting('logging_enabled', 'true' if data['logging_enabled'] else 'false')
 
     return jsonify({'message': 'Instellingen opgeslagen'})
+
+
+# ===== API: ADMIN USER MANAGEMENT =====
+
+@app.route('/api/admin/users', methods=['GET'])
+@requires_auth
+@requires_admin
+def api_admin_get_users():
+    """Haal alle users op (admin only)."""
+    users = db.get_all_users()
+    return jsonify({'users': users})
+
+
+@app.route('/api/admin/users/<int:user_id>', methods=['PUT'])
+@requires_auth
+@requires_admin
+def api_admin_update_user(user_id: int):
+    """Update user gegevens (admin only)."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Geen data ontvangen'}), 400
+
+    user = db.get_user_by_id(user_id)
+    if not user:
+        return jsonify({'error': 'Gebruiker niet gevonden'}), 404
+
+    updated = db.update_user(
+        user_id=user_id,
+        email=data.get('email'),
+        role=data.get('role'),
+        allowed_shelves=data.get('allowed_shelves'),
+    )
+
+    if updated:
+        return jsonify({'message': 'Gebruiker bijgewerkt'})
+    else:
+        return jsonify({'error': 'Geen wijzigingen'}), 400
+
+
+@app.route('/api/admin/users/<int:user_id>', methods=['DELETE'])
+@requires_auth
+@requires_admin
+def api_admin_delete_user(user_id: int):
+    """Verwijder user (admin only, niet jezelf)."""
+    current = get_current_user()
+    if current['id'] == user_id:
+        return jsonify({'error': 'Je kunt jezelf niet verwijderen'}), 400
+
+    deleted = db.delete_user(user_id)
+    if deleted:
+        return jsonify({'message': 'Gebruiker verwijderd'})
+    else:
+        return jsonify({'error': 'Gebruiker niet gevonden'}), 404
 
 
 @app.route('/api/health', methods=['GET'])
@@ -355,12 +557,12 @@ def api_health():
 
 @app.route('/api/update', methods=['POST'])
 @requires_auth
+@requires_admin
 def api_update():
-    """Update applicatie code via git pull."""
+    """Update applicatie code via git pull (admin only)."""
     import subprocess
 
     try:
-        # Check of we in een git repository zitten
         result = subprocess.run(
             ['git', 'rev-parse', '--git-dir'],
             cwd='/app',
@@ -375,7 +577,6 @@ def api_update():
                 'hint': 'Code is waarschijnlijk handmatig geüpload'
             }), 400
 
-        # Git pull uitvoeren
         result = subprocess.run(
             ['git', 'pull', 'origin', 'claude/wishlist-web-interface-80kID'],
             cwd='/app',
@@ -407,30 +608,25 @@ def api_update():
 
 def initialize():
     """Initialiseer applicatie bij startup."""
-    # Initialiseer database
     db.init_db()
 
-    # Migreer van wishlist.txt indien aanwezig
     txt_path = os.environ.get("WISHLIST_FILE", "/data/wishlist.txt")
     if os.path.exists(txt_path):
         db.migrate_from_txt(txt_path)
-        # Backup maken en verwijderen
         import shutil
         backup_path = txt_path + ".backup"
         shutil.copy(txt_path, backup_path)
         os.remove(txt_path)
-        print(f"✓ Wishlist.txt gemigreerd en backup gemaakt: {backup_path}")
+        print(f"Wishlist.txt gemigreerd en backup gemaakt: {backup_path}")
 
 
 if __name__ == '__main__':
     initialize()
 
-    # Start Flask server
     host = os.environ.get('FLASK_HOST', '0.0.0.0')
     port = int(os.environ.get('FLASK_PORT', '5000'))
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
 
-    print(f"✓ Wishlist Web UI gestart op http://{host}:{port}")
-    print(f"✓ Login: {USERNAME} / <WEB_PASSWORD>")
+    print(f"Wishlist Web UI gestart op http://{host}:{port}")
 
     app.run(host=host, port=port, debug=debug)

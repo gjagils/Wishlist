@@ -1,36 +1,64 @@
-// Wishlist Manager - JavaScript
+// Wishlist Manager
 let currentFilter = 'all';
 let wishlistData = { items: [], stats: {} };
+let currentUser = null;
 
 // ===== INIT =====
 document.addEventListener('DOMContentLoaded', () => {
+    loadCurrentUser();
     loadWishlist();
     loadLogs();
     loadShelves();
     loadSettings();
     setupEventListeners();
 
-    // Auto-refresh elke 30 seconden
     setInterval(() => {
         loadWishlist();
         loadLogs();
     }, 30000);
 });
 
+async function loadCurrentUser() {
+    try {
+        const response = await fetch('/api/me');
+        if (response.status === 401) { window.location.href = '/login'; return; }
+        if (!response.ok) return;
+
+        currentUser = await response.json();
+
+        const sidebarUser = document.getElementById('sidebar-user');
+        if (sidebarUser) sidebarUser.textContent = currentUser.username;
+
+        const sidebarTitle = document.getElementById('sidebar-title');
+        if (sidebarTitle) sidebarTitle.textContent = `Boekjes`;
+
+        if (currentUser.role === 'admin') {
+            const navAdmin = document.getElementById('nav-admin');
+            if (navAdmin) navAdmin.style.display = '';
+        }
+    } catch (error) {
+        console.error('Error loading user:', error);
+    }
+}
+
 // ===== EVENT LISTENERS =====
 function setupEventListeners() {
-    // Add form
     document.getElementById('add-form').addEventListener('submit', handleAddItem);
 
-    // Filter buttons
-    document.querySelectorAll('.filter-btn').forEach(btn => {
+    document.querySelectorAll('.filter-tab').forEach(btn => {
         btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
             e.target.classList.add('active');
             currentFilter = e.target.dataset.status;
             renderWishlist();
         });
     });
+}
+
+// ===== SIDEBAR TOGGLE =====
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('open');
+    document.getElementById('sidebar-overlay').classList.toggle('open');
 }
 
 // ===== API CALLS =====
@@ -45,7 +73,6 @@ async function loadShelves() {
         const select = document.getElementById('shelf');
         const group = document.getElementById('shelf-group');
 
-        // Vul dropdown met planken
         data.shelves.forEach(shelf => {
             const option = document.createElement('option');
             option.value = shelf.name;
@@ -53,7 +80,6 @@ async function loadShelves() {
             select.appendChild(option);
         });
 
-        // Toon de dropdown
         group.style.display = '';
     } catch (error) {
         console.error('Error loading shelves:', error);
@@ -63,6 +89,7 @@ async function loadShelves() {
 async function loadWishlist() {
     try {
         const response = await fetch('/api/wishlist');
+        if (response.status === 401) { window.location.href = '/login'; return; }
         if (!response.ok) throw new Error('Laden mislukt');
 
         wishlistData = await response.json();
@@ -70,7 +97,11 @@ async function loadWishlist() {
         renderWishlist();
     } catch (error) {
         console.error('Error loading wishlist:', error);
-        showError('wishlist-container', 'Kon wishlist niet laden');
+        document.getElementById('wishlist-container').innerHTML = `
+            <div class="empty-state">
+                <h3>Fout bij laden</h3>
+                <p>Kon wishlist niet laden</p>
+            </div>`;
     } finally {
         document.getElementById('loading').style.display = 'none';
     }
@@ -79,8 +110,7 @@ async function loadWishlist() {
 async function loadLogs() {
     try {
         const response = await fetch('/api/logs?limit=20');
-        if (!response.ok) throw new Error('Laden mislukt');
-
+        if (!response.ok) return;
         const data = await response.json();
         renderLogs(data.logs);
     } catch (error) {
@@ -90,8 +120,6 @@ async function loadLogs() {
 
 async function handleAddItem(e) {
     e.preventDefault();
-    console.log('Form submitted!'); // DEBUG
-
     const author = document.getElementById('author').value.trim();
     const title = document.getElementById('title').value.trim();
     const shelfSelect = document.getElementById('shelf');
@@ -117,8 +145,8 @@ async function handleAddItem(e) {
         const data = await response.json();
 
         if (response.ok) {
-            const shelfMsg = shelfName ? ` → ${shelfName}` : '';
-            showMessage(messageEl, `✓ ${author} - "${title}" toegevoegd!${shelfMsg}`, 'success');
+            const shelfMsg = shelfName ? ` \u2192 ${shelfName}` : '';
+            showMessage(messageEl, `${author} - "${title}" toegevoegd!${shelfMsg}`, 'success');
             document.getElementById('add-form').reset();
             loadWishlist();
             loadLogs();
@@ -126,27 +154,17 @@ async function handleAddItem(e) {
             showMessage(messageEl, data.error || 'Toevoegen mislukt', 'error');
         }
     } catch (error) {
-        console.error('Fetch error:', error); // DEBUG
         showMessage(messageEl, 'Netwerkfout: ' + error.message, 'error');
     }
 }
 
 async function deleteItem(itemId, title) {
-    if (!confirm(`Weet je zeker dat je "${title}" wilt verwijderen?`)) {
-        return;
-    }
+    if (!confirm(`"${title}" verwijderen?`)) return;
 
     try {
-        const response = await fetch(`/api/wishlist/${itemId}`, {
-            method: 'DELETE'
-        });
-
-        if (response.ok) {
-            loadWishlist();
-            loadLogs();
-        } else {
-            alert('Verwijderen mislukt');
-        }
+        const response = await fetch(`/api/wishlist/${itemId}`, { method: 'DELETE' });
+        if (response.ok) { loadWishlist(); loadLogs(); }
+        else alert('Verwijderen mislukt');
     } catch (error) {
         alert('Netwerkfout: ' + error.message);
     }
@@ -155,36 +173,11 @@ async function deleteItem(itemId, title) {
 async function startSearchNow() {
     const btn = document.getElementById('btn-search-now');
     btn.disabled = true;
-    btn.textContent = '⏳ Bezig...';
+    const origText = btn.innerHTML;
+    btn.innerHTML = '<svg viewBox="0 0 20 20" width="16" height="16"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20" stroke-dashoffset="0"><animateTransform attributeName="transform" type="rotate" dur="0.8s" from="0 10 10" to="360 10 10" repeatCount="indefinite"/></circle></svg> Bezig...';
 
     try {
         const response = await fetch('/api/search/start', {
-            method: 'POST',
-            credentials: 'include'
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            btn.textContent = '✓ Gestart';
-            loadWishlist();
-            loadLogs();
-        } else {
-            alert(data.error || 'Zoekactie starten mislukt');
-        }
-    } catch (error) {
-        alert('Netwerkfout: ' + error.message);
-    } finally {
-        setTimeout(() => {
-            btn.disabled = false;
-            btn.textContent = '🔍 Nu zoeken';
-        }, 3000);
-    }
-}
-
-async function retrySearch(itemId, title) {
-    try {
-        const response = await fetch(`/api/wishlist/${itemId}/retry`, {
             method: 'POST',
             credentials: 'include'
         });
@@ -194,6 +187,27 @@ async function retrySearch(itemId, title) {
             loadLogs();
         } else {
             const data = await response.json();
+            alert(data.error || 'Zoekactie starten mislukt');
+        }
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+    } finally {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }, 3000);
+    }
+}
+
+async function retrySearch(itemId) {
+    try {
+        const response = await fetch(`/api/wishlist/${itemId}/retry`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+        if (response.ok) { loadWishlist(); loadLogs(); }
+        else {
+            const data = await response.json();
             alert(data.error || 'Opnieuw zoeken mislukt');
         }
     } catch (error) {
@@ -202,16 +216,16 @@ async function retrySearch(itemId, title) {
 }
 
 async function deleteAllFound() {
-    const doneItems = wishlistData.items.filter(item => item.status === 'found' || item.status === 'shelved');
+    const doneItems = wishlistData.items.filter(item =>
+        item.status === 'found' || item.status === 'shelved'
+    );
 
     if (doneItems.length === 0) {
         alert('Geen afgeronde items om te verwijderen');
         return;
     }
 
-    if (!confirm(`Weet je zeker dat je alle ${doneItems.length} afgeronde item(s) wilt verwijderen?`)) {
-        return;
-    }
+    if (!confirm(`${doneItems.length} afgeronde item(s) verwijderen?`)) return;
 
     try {
         let totalDeleted = 0;
@@ -227,7 +241,6 @@ async function deleteAllFound() {
                 totalDeleted += data.deleted;
             }
         }
-        alert(`✓ ${totalDeleted} item(s) verwijderd`);
         loadWishlist();
         loadLogs();
     } catch (error) {
@@ -260,9 +273,7 @@ async function saveSetting(key, value) {
             body: JSON.stringify({ [key]: value }),
             credentials: 'include'
         });
-        if (!response.ok) {
-            alert('Instelling opslaan mislukt');
-        }
+        if (!response.ok) alert('Instelling opslaan mislukt');
     } catch (error) {
         alert('Netwerkfout: ' + error.message);
     }
@@ -270,19 +281,43 @@ async function saveSetting(key, value) {
 
 // ===== RENDER FUNCTIONS =====
 function updateStats(stats) {
-    document.getElementById('stat-total').innerHTML = `Totaal: <strong>${stats.total}</strong>`;
-    document.getElementById('stat-pending').innerHTML = `Pending: <strong>${stats.pending}</strong>`;
-    document.getElementById('stat-searching').innerHTML = `Zoeken: <strong>${stats.searching}</strong>`;
-    document.getElementById('stat-found').innerHTML = `Gevonden: <strong>${stats.found}</strong>`;
-    document.getElementById('stat-importing').innerHTML = `Importeren: <strong>${stats.importing || 0}</strong>`;
-    document.getElementById('stat-shelved').innerHTML = `Op plank: <strong>${stats.shelved || 0}</strong>`;
-    document.getElementById('stat-failed').innerHTML = `Mislukt: <strong>${stats.failed}</strong>`;
+    document.getElementById('stat-total').textContent = stats.total || 0;
+    document.getElementById('stat-pending').textContent = stats.pending || 0;
+    document.getElementById('stat-searching').textContent = stats.searching || 0;
+    document.getElementById('stat-found').textContent = (stats.found || 0) + (stats.importing || 0) + (stats.shelved || 0);
+}
+
+function getStatusText(status) {
+    return {
+        'pending': 'Pending',
+        'searching': 'Searching',
+        'found': 'Found',
+        'importing': 'Importing',
+        'shelved': 'Shelved',
+        'failed': 'Failed'
+    }[status] || status;
+}
+
+function getCoverGradient(title) {
+    // Generate a consistent color based on title
+    let hash = 0;
+    for (let i = 0; i < (title || '').length; i++) {
+        hash = title.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const gradients = [
+        'linear-gradient(135deg, #e6f7f5 0%, #d1eef9 100%)',
+        'linear-gradient(135deg, #fdf0ea 0%, #fce4d6 100%)',
+        'linear-gradient(135deg, #e8f1fb 0%, #d6e5f5 100%)',
+        'linear-gradient(135deg, #f3e8f9 0%, #e8d5f0 100%)',
+        'linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%)',
+        'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)',
+    ];
+    return gradients[Math.abs(hash) % gradients.length];
 }
 
 function renderWishlist() {
     const container = document.getElementById('wishlist-container');
 
-    // Filter items
     let items = wishlistData.items;
     if (currentFilter !== 'all') {
         items = items.filter(item => item.status === currentFilter);
@@ -292,57 +327,63 @@ function renderWishlist() {
         container.innerHTML = `
             <div class="empty-state">
                 <h3>Geen items</h3>
-                <p>${currentFilter === 'all' ? 'Voeg je eerste item toe!' : `Geen items met status "${currentFilter}"`}</p>
-            </div>
-        `;
+                <p>${currentFilter === 'all' ? 'Voeg je eerste boek toe!' : `Geen items met status "${currentFilter}"`}</p>
+            </div>`;
         return;
     }
 
-    // Sorteer items: actieve items eerst, dan afgeronde (found/shelved)
     const doneStatuses = ['found', 'shelved'];
-    const unfoundItems = items.filter(item => !doneStatuses.includes(item.status));
-    const foundItems = items.filter(item => doneStatuses.includes(item.status));
+    const activeItems = items.filter(item => !doneStatuses.includes(item.status));
+    const doneItems = items.filter(item => doneStatuses.includes(item.status));
 
-    const renderItem = (item) => `
-        <div class="wishlist-item">
-            <div class="item-header">
-                <div class="item-title">
-                    <h3>"${escapeHtml(item.title)}"</h3>
-                    <div class="item-author">door ${escapeHtml(item.author)}</div>
+    const renderCard = (item) => {
+        const gradient = getCoverGradient(item.title);
+        const addedBy = item.added_by ? `<span class="meta-tag"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>${escapeHtml(item.added_by)}</span>` : '';
+        const shelfTag = item.shelf_name ? `<span class="meta-tag shelf-tag"><svg viewBox="0 0 20 20" fill="currentColor"><path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V15a1 1 0 11-2 0V4.804z"/></svg>${escapeHtml(item.shelf_name)}</span>` : '';
+
+        let actionBtns = '';
+        if (item.status !== 'searching') {
+            actionBtns += `<button class="card-btn" onclick="retrySearch(${item.id})"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>Search again</button>`;
+        }
+        actionBtns += `<button class="card-btn btn-delete" onclick="deleteItem(${item.id}, '${escapeHtml(item.title)}')"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>Delete</button>`;
+
+        return `
+        <div class="book-card">
+            <div class="book-cover" style="background: ${gradient}">
+                <div class="book-cover-placeholder">
+                    <svg viewBox="0 0 64 64" fill="none"><rect x="12" y="8" width="40" height="48" rx="4" fill="currentColor" opacity="0.15"/><rect x="16" y="12" width="32" height="40" rx="2" fill="white" opacity="0.5"/><line x1="22" y1="22" x2="42" y2="22" stroke="currentColor" stroke-width="2" opacity="0.2"/><line x1="22" y1="28" x2="42" y2="28" stroke="currentColor" stroke-width="2" opacity="0.2"/><line x1="22" y1="34" x2="36" y2="34" stroke="currentColor" stroke-width="2" opacity="0.2"/></svg>
                 </div>
-                <div class="item-actions">
-                    ${item.shelf_name ? `<span class="shelf-badge">${escapeHtml(item.shelf_name)}</span>` : ''}
-                    <span class="status-badge status-${item.status}">${getStatusText(item.status)}</span>
-                    ${item.status !== 'searching' ? `<button class="btn btn-secondary" onclick="retrySearch(${item.id}, '${escapeHtml(item.title)}')">Opnieuw zoeken</button>` : ''}
-                    <button class="btn btn-danger" onclick="deleteItem(${item.id}, '${escapeHtml(item.title)}')">
-                        Verwijder
-                    </button>
+                <span class="status-pill status-${item.status}">${getStatusText(item.status)}</span>
+            </div>
+            <div class="book-info">
+                <div class="book-title">${escapeHtml(item.title)}</div>
+                <div class="book-author">${escapeHtml(item.author)}</div>
+                <div class="book-meta">
+                    ${shelfTag}
+                    ${addedBy}
                 </div>
             </div>
-            <div class="item-meta">
-                <span>📅 Toegevoegd: ${formatDate(item.added_date)}</span>
-                <span>📍 Via: ${item.added_via}</span>
-                ${item.last_search ? `<span>🔍 Laatste zoek: ${formatDate(item.last_search)}</span>` : ''}
-                ${item.error_message ? `<span style="color: var(--danger-color)">⚠️ ${escapeHtml(item.error_message)}</span>` : ''}
+            <div class="book-footer">
+                <span class="book-date">ADDED ${formatDate(item.added_date).toUpperCase()}</span>
+                <div class="book-actions">
+                    ${actionBtns}
+                </div>
             </div>
-        </div>
-    `;
+        </div>`;
+    };
 
     let html = '';
 
-    // Render niet-gevonden items
-    if (unfoundItems.length > 0) {
-        html += unfoundItems.map(renderItem).join('');
+    if (activeItems.length > 0) {
+        html += activeItems.map(renderCard).join('');
     }
 
-    // Voeg scheidingslijn toe als er beide categorieën zijn
-    if (unfoundItems.length > 0 && foundItems.length > 0) {
-        html += '<div class="items-separator">Gevonden</div>';
+    if (activeItems.length > 0 && doneItems.length > 0) {
+        html += '<div class="grid-separator">Gevonden</div>';
     }
 
-    // Render gevonden items
-    if (foundItems.length > 0) {
-        html += foundItems.map(renderItem).join('');
+    if (doneItems.length > 0) {
+        html += doneItems.map(renderCard).join('');
     }
 
     container.innerHTML = html;
@@ -351,7 +392,7 @@ function renderWishlist() {
 function renderLogs(logs) {
     const container = document.getElementById('logs-container');
 
-    if (logs.length === 0) {
+    if (!logs || logs.length === 0) {
         container.innerHTML = '<div class="empty-state"><p>Nog geen activiteit</p></div>';
         return;
     }
@@ -365,60 +406,27 @@ function renderLogs(logs) {
     `).join('');
 }
 
-// ===== UTILITY FUNCTIONS =====
+// ===== UTILITY =====
 function showMessage(element, message, type) {
     element.textContent = message;
-    element.className = `message show ${type}`;
-
-    setTimeout(() => {
-        element.classList.remove('show');
-    }, 5000);
-}
-
-function showError(containerId, message) {
-    document.getElementById(containerId).innerHTML = `
-        <div class="empty-state">
-            <h3>⚠️ Fout</h3>
-            <p>${message}</p>
-        </div>
-    `;
-}
-
-function getStatusText(status) {
-    const statusMap = {
-        'pending': 'Pending',
-        'searching': 'Zoeken...',
-        'found': 'Gevonden',
-        'importing': 'Importeren...',
-        'shelved': 'Op plank',
-        'failed': 'Mislukt'
-    };
-    return statusMap[status] || status;
+    element.className = `toast-message show ${type}`;
+    setTimeout(() => element.classList.remove('show'), 5000);
 }
 
 function formatDate(dateStr) {
     if (!dateStr) return '-';
     const date = new Date(dateStr);
-    return date.toLocaleDateString('nl-NL', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric'
-    });
+    return date.toLocaleDateString('nl-NL', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 function formatDateTime(dateStr) {
     if (!dateStr) return '-';
     const date = new Date(dateStr);
-    return date.toLocaleString('nl-NL', {
-        day: '2-digit',
-        month: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-    });
+    return date.toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text || '';
     return div.innerHTML;
 }

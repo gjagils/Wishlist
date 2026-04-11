@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wishlist - Inloggen</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='20' y='15' width='60' height='70' rx='3' fill='%2300A699'/%3E%3Crect x='25' y='20' width='50' height='60' fill='%23fff'/%3E%3Cline x1='35' y1='30' x2='65' y2='30' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='40' x2='65' y2='40' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='50' x2='65' y2='50' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='60' x2='55' y2='60' stroke='%2300A699' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #00A699;
+            --primary-dark: #008f84;
+            --neutral-50: #F5F5F5;
+            --neutral-200: #E0E0E0;
+            --neutral-300: #BDBDBD;
+            --neutral-500: #757575;
+            --neutral-900: #212121;
+            --white: #FFFFFF;
+            --danger: #D32F2F;
+            --danger-light: #fdeaea;
+            --radius: 12px;
+            --shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--neutral-50);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            -webkit-font-smoothing: antialiased;
+        }
+        .login-card {
+            background: var(--white);
+            border-radius: var(--radius);
+            padding: 40px;
+            box-shadow: var(--shadow);
+            width: 100%;
+            max-width: 400px;
+        }
+        .login-brand {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .login-brand svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 12px;
+        }
+        .login-brand h1 {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--neutral-900);
+        }
+        .login-brand p {
+            font-size: 0.85rem;
+            color: var(--neutral-500);
+            margin-top: 4px;
+        }
+        .form-group {
+            margin-bottom: 18px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            color: var(--neutral-500);
+            margin-bottom: 6px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1.5px solid var(--neutral-200);
+            border-radius: 8px;
+            font-family: 'Manrope', sans-serif;
+            font-size: 0.95rem;
+            color: var(--neutral-900);
+            transition: border-color 0.15s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(0,166,153,0.1);
+        }
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary);
+            color: var(--white);
+            border: none;
+            border-radius: 8px;
+            font-family: 'Manrope', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-top: 8px;
+        }
+        .login-btn:hover {
+            background: var(--primary-dark);
+            box-shadow: 0 4px 12px rgba(0,166,153,0.25);
+            transform: translateY(-1px);
+        }
+        .login-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .login-error {
+            background: var(--danger-light);
+            color: var(--danger);
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            display: none;
+            text-align: center;
+            font-size: 0.85rem;
+        }
+        .login-info {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 0.8rem;
+            color: var(--neutral-300);
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-brand">
+            <svg viewBox="0 0 48 48" fill="none">
+                <rect x="8" y="4" width="32" height="40" rx="4" fill="#00A699"/>
+                <rect x="12" y="8" width="24" height="32" rx="2" fill="white"/>
+                <line x1="17" y1="16" x2="31" y2="16" stroke="#00A699" stroke-width="2"/>
+                <line x1="17" y1="22" x2="31" y2="22" stroke="#00A699" stroke-width="2"/>
+                <line x1="17" y1="28" x2="26" y2="28" stroke="#00A699" stroke-width="2"/>
+            </svg>
+            <h1>Boekjes van Gerd-Jan</h1>
+            <p>Wishlist</p>
+        </div>
+        <div id="login-error" class="login-error"></div>
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">GEBRUIKERSNAAM</label>
+                <input type="text" id="username" name="username" autocomplete="username" autofocus required>
+            </div>
+            <div class="form-group">
+                <label for="password">WACHTWOORD</label>
+                <input type="password" id="password" name="password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="login-btn" id="login-btn">Inloggen</button>
+        </form>
+        <div class="login-info">
+            Gebruik je Calibre-Web inloggegevens
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const errorEl = document.getElementById('login-error');
+
+            btn.disabled = true;
+            btn.textContent = 'Bezig...';
+            errorEl.style.display = 'none';
+
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('username').value,
+                        password: document.getElementById('password').value,
+                    }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    window.location.href = '/';
+                } else {
+                    errorEl.textContent = data.error || 'Inloggen mislukt';
+                    errorEl.style.display = 'block';
+                }
+            } catch (error) {
+                errorEl.textContent = 'Netwerkfout: ' + error.message;
+                errorEl.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Inloggen';
+            }
+        });
+    </script>
+</body>
+</html>

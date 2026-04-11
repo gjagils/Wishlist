@@ -78,6 +78,47 @@ def _invalidate_session():
     _session = None
 
 
+def authenticate_user(username: str, password: str) -> bool:
+    """
+    Authenticeer gebruiker via Calibre-Web login.
+    Stuurt credentials naar Calibre-Web en controleert of login slaagt.
+    Slaat de sessie NIET op — dit is alleen een auth-check.
+    """
+    if not CALIBREWEB_URL:
+        return False
+
+    session = requests.Session()
+    login_url = f"{CALIBREWEB_URL}/login"
+
+    try:
+        resp = session.get(login_url, timeout=10)
+        resp.raise_for_status()
+
+        csrf_match = re.search(
+            r'name=["\']csrf_token["\'][^>]*value=["\']([^"\']+)["\']',
+            resp.text
+        )
+
+        login_data = {
+            "username": username,
+            "password": password,
+            "submit": "",
+            "next": "/",
+            "remember_me": "on",
+        }
+
+        if csrf_match:
+            login_data["csrf_token"] = csrf_match.group(1)
+
+        resp = session.post(login_url, data=login_data, timeout=10, allow_redirects=True)
+
+        # Login geslaagd als we niet meer op /login pagina staan
+        return "/login" not in resp.url or "login" not in resp.text.lower()
+
+    except requests.RequestException:
+        return False
+
+
 def fetch_shelves() -> List[Dict]:
     """
     Haal openbare boekenplanken op uit Calibre-Web.

@@ -3,6 +3,7 @@
 Database module voor wishlist applicatie.
 SQLite database met wishlist items en logs.
 """
+import json
 import sqlite3
 import os
 from datetime import datetime
@@ -100,6 +101,39 @@ def init_db() -> None:
             conn.execute("ALTER TABLE wishlist ADD COLUMN shelf_name TEXT")
             print("Database migratie: shelf_name kolom toegevoegd")
 
+        # Migratie: users tabel
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                email TEXT,
+                role TEXT DEFAULT 'user',
+                allowed_shelves TEXT,
+                created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_login TEXT
+            )
+        """)
+
+        # Migratie: voeg user_id toe aan wishlist
+        try:
+            conn.execute("SELECT user_id FROM wishlist LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE wishlist ADD COLUMN user_id INTEGER REFERENCES users(id)")
+            print("Database migratie: user_id kolom toegevoegd")
+
+        # Seed admin user als users tabel leeg is
+        admin_username = os.environ.get('WEB_USERNAME', 'admin')
+        existing_admin = conn.execute(
+            "SELECT id FROM users WHERE role = 'admin' LIMIT 1"
+        ).fetchone()
+        if not existing_admin:
+            conn.execute(
+                """INSERT OR IGNORE INTO users (username, role)
+                   VALUES (?, 'admin')""",
+                (admin_username,)
+            )
+            print(f"Admin user aangemaakt: {admin_username}")
+
     # Set permissions op database file en WAL files
     try:
         if os.path.exists(DB_PATH):
@@ -169,7 +203,8 @@ def migrate_from_txt(txt_path: str) -> int:
 # ===== WISHLIST CRUD =====
 
 def add_wishlist_item(author: str, title: str, added_via: str = "web",
-                     shelf_name: Optional[str] = None) -> int:
+                     shelf_name: Optional[str] = None,
+                     user_id: Optional[int] = None) -> int:
     """Voeg nieuw item toe aan wishlist."""
     raw_line = f'{author} - "{title}"'
 
@@ -184,9 +219,9 @@ def add_wishlist_item(author: str, title: str, added_via: str = "web",
             raise ValueError(f"Item bestaat al: {raw_line}")
 
         cursor = conn.execute(
-            """INSERT INTO wishlist (author, title, raw_line, added_via, shelf_name)
-               VALUES (?, ?, ?, ?, ?)""",
-            (author, title, raw_line, added_via, shelf_name)
+            """INSERT INTO wishlist (author, title, raw_line, added_via, shelf_name, user_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (author, title, raw_line, added_via, shelf_name, user_id)
         )
         item_id = cursor.lastrowid
 
@@ -200,18 +235,30 @@ def add_wishlist_item(author: str, title: str, added_via: str = "web",
         return item_id
 
 
-def get_wishlist_items(status: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Haal wishlist items op, optioneel gefilterd op status."""
+def get_wishlist_items(status: Optional[str] = None,
+                      user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Haal wishlist items op, optioneel gefilterd op status en/of user_id."""
     with get_db() as conn:
+        conditions = []
+        params = []
+
         if status:
-            rows = conn.execute(
-                "SELECT * FROM wishlist WHERE status = ? ORDER BY added_date DESC",
-                (status,)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM wishlist ORDER BY added_date DESC"
-            ).fetchall()
+            conditions.append("w.status = ?")
+            params.append(status)
+        if user_id is not None:
+            conditions.append("w.user_id = ?")
+            params.append(user_id)
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        rows = conn.execute(
+            f"""SELECT w.*, u.username AS added_by
+                FROM wishlist w
+                LEFT JOIN users u ON w.user_id = u.id
+                {where}
+                ORDER BY w.added_date DESC""",
+            params
+        ).fetchall()
 
         return [dict(row) for row in rows]
 
@@ -358,6 +405,119 @@ def set_setting(key: str, value: str) -> None:
                VALUES (?, ?)""",
             (key, value)
         )
+
+
+# ===== USERS =====
+
+def create_user(username: str, email: Optional[str] = None,
+                role: str = "user",
+                allowed_shelves: Optional[List[str]] = None) -> int:
+    """Maak nieuwe user aan of update bestaande."""
+    shelves_json = json.dumps(allowed_shelves) if allowed_shelves else None
+    with get_db() as conn:
+        cursor = conn.execute(
+            """INSERT INTO users (username, email, role, allowed_shelves)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(username) DO UPDATE SET
+                   email = COALESCE(excluded.email, users.email),
+                   role = excluded.role,
+                   allowed_shelves = COALESCE(excluded.allowed_shelves, users.allowed_shelves)""",
+            (username, email, role, shelves_json)
+        )
+        # Haal id op (werkt voor zowel insert als update)
+        row = conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()
+        return row["id"]
+
+
+def get_user(username: str) -> Optional[Dict[str, Any]]:
+    """Haal user op via username."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        if not row:
+            return None
+        user = dict(row)
+        user["allowed_shelves"] = json.loads(user["allowed_shelves"]) if user["allowed_shelves"] else []
+        return user
+
+
+def get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+    """Haal user op via id."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            return None
+        user = dict(row)
+        user["allowed_shelves"] = json.loads(user["allowed_shelves"]) if user["allowed_shelves"] else []
+        return user
+
+
+def get_all_users() -> List[Dict[str, Any]]:
+    """Haal alle users op."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM users ORDER BY created_date").fetchall()
+        users = []
+        for row in rows:
+            user = dict(row)
+            user["allowed_shelves"] = json.loads(user["allowed_shelves"]) if user["allowed_shelves"] else []
+            users.append(user)
+        return users
+
+
+def update_user(user_id: int, email: Optional[str] = None,
+                role: Optional[str] = None,
+                allowed_shelves: Optional[List[str]] = None) -> bool:
+    """Update user gegevens."""
+    with get_db() as conn:
+        updates = []
+        params = []
+
+        if email is not None:
+            updates.append("email = ?")
+            params.append(email)
+        if role is not None:
+            updates.append("role = ?")
+            params.append(role)
+        if allowed_shelves is not None:
+            updates.append("allowed_shelves = ?")
+            params.append(json.dumps(allowed_shelves))
+
+        if not updates:
+            return False
+
+        params.append(user_id)
+        cursor = conn.execute(
+            f"UPDATE users SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+        return cursor.rowcount > 0
+
+
+def update_user_login(username: str) -> None:
+    """Update last_login timestamp."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE users SET last_login = ? WHERE username = ?",
+            (datetime.now().isoformat(), username)
+        )
+
+
+def delete_user(user_id: int) -> bool:
+    """Verwijder user."""
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return cursor.rowcount > 0
+
+
+def get_admin_users() -> List[Dict[str, Any]]:
+    """Haal alle admin users op."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM users WHERE role = 'admin'").fetchall()
+        users = []
+        for row in rows:
+            user = dict(row)
+            user["allowed_shelves"] = json.loads(user["allowed_shelves"]) if user["allowed_shelves"] else []
+            users.append(user)
+        return users
 
 
 if __name__ == "__main__":

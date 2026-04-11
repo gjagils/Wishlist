@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wishlist - Gebruikersbeheer</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='20' y='15' width='60' height='70' rx='3' fill='%2300A699'/%3E%3Crect x='25' y='20' width='50' height='60' fill='%23fff'/%3E%3Cline x1='35' y1='30' x2='65' y2='30' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='40' x2='65' y2='40' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='50' x2='65' y2='50' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='60' x2='55' y2='60' stroke='%2300A699' stroke-width='2'/%3E%3C/svg%3E">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700&family=Manrope:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        body { padding: 0; }
+        .admin-layout {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+        .admin-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 28px;
+        }
+        .admin-header h1 {
+            font-family: var(--font-heading);
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        .admin-header-actions { display: flex; gap: 10px; }
+        .admin-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 18px;
+            background: var(--primary);
+            color: var(--white);
+            text-decoration: none;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.85rem;
+            transition: all 0.15s;
+        }
+        .admin-link:hover { background: var(--primary-dark); }
+        .admin-link.secondary {
+            background: var(--white);
+            color: var(--neutral-700);
+            border: 1.5px solid var(--neutral-200);
+        }
+        .admin-link.secondary:hover { border-color: var(--neutral-300); }
+        .admin-note {
+            color: var(--neutral-500);
+            font-size: 0.85rem;
+            margin-bottom: 20px;
+        }
+        .user-card {
+            background: var(--white);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        .user-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto auto auto;
+            gap: 16px;
+            align-items: center;
+            padding: 16px 20px;
+        }
+        .user-name {
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+        .user-email {
+            font-size: 0.85rem;
+            color: var(--neutral-500);
+        }
+        .role-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: var(--radius-full);
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .role-admin { background: #7B61A0; color: white; }
+        .role-user { background: var(--primary); color: white; }
+        .shelf-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+        .shelf-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-size: 0.72rem;
+            font-weight: 500;
+            background: var(--primary-light);
+            color: var(--primary-dark);
+        }
+        .no-value { color: var(--neutral-300); font-size: 0.8rem; font-style: italic; }
+        .user-actions { display: flex; gap: 8px; }
+        .user-btn {
+            padding: 6px 14px;
+            border: 1.5px solid var(--neutral-200);
+            border-radius: var(--radius-sm);
+            background: var(--white);
+            font-family: var(--font-body);
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            color: var(--neutral-700);
+        }
+        .user-btn:hover { border-color: var(--primary); color: var(--primary); }
+        .user-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+        .edit-panel {
+            padding: 20px 24px;
+            background: var(--neutral-50);
+            border-top: 1px solid var(--neutral-200);
+        }
+        .edit-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .edit-grid .form-group:last-of-type { grid-column: 1 / -1; }
+        .edit-grid .form-group label {
+            display: block;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            color: var(--neutral-500);
+            margin-bottom: 6px;
+        }
+        .edit-grid .form-group input,
+        .edit-grid .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1.5px solid var(--neutral-200);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            font-size: 0.9rem;
+            background: var(--white);
+        }
+        .edit-grid .form-group input:focus,
+        .edit-grid .form-group select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        .shelf-checkboxes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .shelf-checkbox {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            background: var(--white);
+            border: 1.5px solid var(--neutral-200);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.15s;
+        }
+        .shelf-checkbox:has(input:checked) {
+            background: var(--primary-light);
+            border-color: var(--primary);
+        }
+        .shelf-checkbox input { width: 16px; height: 16px; accent-color: var(--primary); }
+        .edit-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .btn-save {
+            padding: 10px 24px;
+            background: var(--primary);
+            color: var(--white);
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-save:hover { background: var(--primary-dark); }
+        .btn-cancel {
+            padding: 10px 24px;
+            background: var(--white);
+            color: var(--neutral-700);
+            border: 1.5px solid var(--neutral-200);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-body);
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        @media (max-width: 768px) {
+            .user-row {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            .edit-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-layout">
+        <div class="admin-header">
+            <h1>Gebruikersbeheer</h1>
+            <div class="admin-header-actions">
+                <a href="/" class="admin-link">Terug naar Wishlist</a>
+                <a href="/logout" class="admin-link secondary">Uitloggen</a>
+            </div>
+        </div>
+
+        <p class="admin-note">
+            Gebruikers verschijnen hier automatisch na hun eerste login via Calibre-Web. Wijs boekenplanken toe zodat ze items kunnen toevoegen.
+        </p>
+
+        <div id="users-container">
+            <div style="text-align:center; padding:40px; color:var(--neutral-500)">Laden...</div>
+        </div>
+    </div>
+
+    <script>
+        let allShelves = [];
+        let editingUserId = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadShelves().then(() => loadUsers());
+        });
+
+        async function loadShelves() {
+            try {
+                const response = await fetch('/api/shelves');
+                if (response.status === 401) { window.location.href = '/login'; return; }
+                if (!response.ok) return;
+                const data = await response.json();
+                allShelves = data.shelves || [];
+            } catch (error) {
+                console.error('Error loading shelves:', error);
+            }
+        }
+
+        async function loadUsers() {
+            try {
+                const response = await fetch('/api/admin/users');
+                if (response.status === 401) { window.location.href = '/login'; return; }
+                if (response.status === 403) {
+                    document.getElementById('users-container').innerHTML =
+                        '<div style="text-align:center;padding:40px;color:var(--neutral-500)">Geen admin rechten.</div>';
+                    return;
+                }
+                if (!response.ok) throw new Error('Laden mislukt');
+                const data = await response.json();
+                renderUsers(data.users);
+            } catch (error) {
+                document.getElementById('users-container').innerHTML =
+                    `<div style="text-align:center;padding:40px;color:var(--danger)">${error.message}</div>`;
+            }
+        }
+
+        function renderUsers(users) {
+            const container = document.getElementById('users-container');
+            if (users.length === 0) {
+                container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--neutral-500)">Nog geen gebruikers.</div>';
+                return;
+            }
+
+            container.innerHTML = users.map(user => {
+                const shelves = user.allowed_shelves && user.allowed_shelves.length > 0
+                    ? user.allowed_shelves.map(s => `<span class="shelf-tag">${esc(s)}</span>`).join('')
+                    : '<span class="no-value">Geen planken</span>';
+
+                const lastLogin = user.last_login
+                    ? new Date(user.last_login).toLocaleString('nl-NL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                    : 'Nooit';
+
+                return `
+                <div class="user-card">
+                    <div class="user-row">
+                        <div>
+                            <div class="user-name">${esc(user.username)}</div>
+                            <div class="user-email">${user.email ? esc(user.email) : '<span class="no-value">Geen e-mail</span>'}</div>
+                        </div>
+                        <div class="shelf-tags">${shelves}</div>
+                        <span class="role-badge role-${user.role}">${user.role}</span>
+                        <div style="font-size:0.75rem;color:var(--neutral-500)">${lastLogin}</div>
+                        <div class="user-actions">
+                            <button class="user-btn" onclick="toggleEdit(${user.id})">Bewerken</button>
+                            ${user.role !== 'admin' ? `<button class="user-btn danger" onclick="deleteUser(${user.id}, '${esc(user.username)}')">Verwijder</button>` : ''}
+                        </div>
+                    </div>
+                    <div class="edit-panel" id="edit-panel-${user.id}" style="display:none">
+                        <div class="edit-grid">
+                            <div class="form-group">
+                                <label>E-MAILADRES</label>
+                                <input type="email" id="edit-email-${user.id}" value="${user.email || ''}" placeholder="gebruiker@voorbeeld.nl">
+                            </div>
+                            <div class="form-group">
+                                <label>ROL</label>
+                                <select id="edit-role-${user.id}">
+                                    <option value="user" ${user.role === 'user' ? 'selected' : ''}>Gebruiker</option>
+                                    <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>BOEKENPLANKEN</label>
+                                <div class="shelf-checkboxes" id="edit-shelves-${user.id}">
+                                    ${allShelves.length > 0 ? allShelves.map(shelf => `
+                                        <label class="shelf-checkbox">
+                                            <input type="checkbox" value="${esc(shelf.name)}"
+                                                ${user.allowed_shelves && user.allowed_shelves.includes(shelf.name) ? 'checked' : ''}>
+                                            ${esc(shelf.name)}
+                                        </label>
+                                    `).join('') : '<span class="no-value">Geen planken beschikbaar (configureer Calibre-Web)</span>'}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="edit-actions">
+                            <button class="btn-save" onclick="saveUser(${user.id})">Opslaan</button>
+                            <button class="btn-cancel" onclick="toggleEdit(${user.id})">Annuleren</button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
+
+        function toggleEdit(userId) {
+            if (editingUserId && editingUserId !== userId) {
+                document.getElementById(`edit-panel-${editingUserId}`).style.display = 'none';
+            }
+            const panel = document.getElementById(`edit-panel-${userId}`);
+            panel.style.display = panel.style.display === 'none' ? '' : 'none';
+            editingUserId = panel.style.display === 'none' ? null : userId;
+        }
+
+        async function saveUser(userId) {
+            const email = document.getElementById(`edit-email-${userId}`).value.trim();
+            const role = document.getElementById(`edit-role-${userId}`).value;
+            const checkboxes = document.querySelectorAll(`#edit-shelves-${userId} input[type="checkbox"]`);
+            const allowedShelves = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+
+            try {
+                const response = await fetch(`/api/admin/users/${userId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: email || null, role, allowed_shelves: allowedShelves }),
+                });
+                if (response.ok) loadUsers();
+                else { const data = await response.json(); alert(data.error || 'Opslaan mislukt'); }
+            } catch (error) {
+                alert('Netwerkfout: ' + error.message);
+            }
+        }
+
+        async function deleteUser(userId, username) {
+            if (!confirm(`"${username}" verwijderen?`)) return;
+            try {
+                const response = await fetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+                if (response.ok) loadUsers();
+                else { const data = await response.json(); alert(data.error || 'Verwijderen mislukt'); }
+            } catch (error) {
+                alert('Netwerkfout: ' + error.message);
+            }
+        }
+
+        function esc(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
