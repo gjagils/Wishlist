@@ -54,23 +54,28 @@ def send_notification(to_emails: List[str], subject: str, body: str) -> bool:
         return False
 
 
-def _get_notification_emails(item: dict) -> List[str]:
-    """Verzamel e-mailadressen voor notificatie: item-eigenaar + alle admins."""
-    emails = set()
-
-    # Admin e-mails
-    for admin in db.get_admin_users():
-        if admin.get("email"):
-            emails.add(admin["email"])
-
-    # Item-eigenaar e-mail
+def _get_owner_email(item: dict) -> Optional[str]:
+    """Haal e-mailadres van de item-eigenaar op."""
     user_id = item.get("user_id")
     if user_id:
         user = db.get_user_by_id(user_id)
         if user and user.get("email"):
-            emails.add(user["email"])
+            return user["email"]
+    return None
 
-    return list(emails)
+
+def _get_admin_emails() -> List[str]:
+    """Haal alle admin e-mailadressen op."""
+    return [a["email"] for a in db.get_admin_users() if a.get("email")]
+
+
+def _is_admin_item(item: dict) -> bool:
+    """Check of het item van een admin is."""
+    user_id = item.get("user_id")
+    if not user_id:
+        return True  # Geen user_id = legacy admin item
+    user = db.get_user_by_id(user_id)
+    return user and user.get("role") == "admin"
 
 
 # Default e-mail templates. Placeholders: {title}, {author}, {shelf}
@@ -111,27 +116,38 @@ def _render_template(template: str, item: dict) -> str:
     )
 
 
+def _send_with_admin_copy(item: dict, subject: str, body: str) -> None:
+    """Stuur mail naar eigenaar, en een kopie naar admins met 'Admin kopie:' prefix."""
+    owner_email = _get_owner_email(item)
+    admin_emails = _get_admin_emails()
+    is_admin = _is_admin_item(item)
+
+    # Mail naar eigenaar
+    if owner_email:
+        send_notification([owner_email], subject, body)
+
+    # Kopie naar admins (alleen als eigenaar geen admin is)
+    if not is_admin and admin_emails:
+        admin_subject = f"Admin kopie: {subject}"
+        send_notification(admin_emails, admin_subject, body)
+    elif is_admin and admin_emails and not owner_email:
+        # Admin item zonder eigenaar-email: stuur naar alle admins
+        send_notification(admin_emails, subject, body)
+
+
 def notify_item_found(item: dict) -> None:
     """Stuur notificatie dat een boek gevonden is."""
-    emails = _get_notification_emails(item)
-    if not emails:
-        return
-
     subject_tpl = db.get_setting("email_found_subject", DEFAULT_FOUND_SUBJECT)
     body_tpl = db.get_setting("email_found_body", DEFAULT_FOUND_BODY)
 
-    send_notification(emails, _render_template(subject_tpl, item),
-                      _render_template(body_tpl, item))
+    _send_with_admin_copy(item, _render_template(subject_tpl, item),
+                          _render_template(body_tpl, item))
 
 
 def notify_item_shelved(item: dict) -> None:
     """Stuur notificatie dat een boek op de plank gezet is."""
-    emails = _get_notification_emails(item)
-    if not emails:
-        return
-
     subject_tpl = db.get_setting("email_shelved_subject", DEFAULT_SHELVED_SUBJECT)
     body_tpl = db.get_setting("email_shelved_body", DEFAULT_SHELVED_BODY)
 
-    send_notification(emails, _render_template(subject_tpl, item),
-                      _render_template(body_tpl, item))
+    _send_with_admin_copy(item, _render_template(subject_tpl, item),
+                          _render_template(body_tpl, item))
