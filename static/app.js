@@ -430,8 +430,10 @@ function applyCover(el, url) {
     const img = new Image();
     img.onload = () => {
         el.style.backgroundImage = `url('${url}')`;
-        el.style.backgroundSize = 'cover';
+        el.style.backgroundSize = 'contain';
         el.style.backgroundPosition = 'center';
+        el.style.backgroundRepeat = 'no-repeat';
+        el.style.backgroundColor = '#f8f8f8';
         const placeholder = el.querySelector('.book-cover-placeholder');
         if (placeholder) placeholder.style.display = 'none';
     };
