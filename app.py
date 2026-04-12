@@ -350,6 +350,64 @@ def api_add_wishlist():
         return jsonify({'error': f'Server fout: {str(e)}'}), 500
 
 
+@app.route('/api/wishlist/<int:item_id>', methods=['PUT'])
+@requires_auth
+def api_update_wishlist(item_id: int):
+    """Bewerk item (auteur, titel, plank)."""
+    user = get_current_user()
+    item = db.get_wishlist_item(item_id)
+
+    if not item:
+        return jsonify({'error': 'Item niet gevonden'}), 404
+
+    if user['role'] != 'admin' and item.get('user_id') != user['id']:
+        return jsonify({'error': 'Geen toegang'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Geen data ontvangen'}), 400
+
+    author = data.get('author', '').strip()
+    title = data.get('title', '').strip()
+    shelf_name = data.get('shelf_name')
+
+    if not author or not title:
+        return jsonify({'error': 'Auteur en titel zijn verplicht'}), 400
+
+    # Valideer plank-toegang voor gewone users
+    if user['role'] != 'admin' and shelf_name:
+        if not user['allowed_shelves'] or shelf_name not in user['allowed_shelves']:
+            return jsonify({'error': 'Je hebt geen toegang tot deze boekenplank'}), 403
+
+    try:
+        db.update_wishlist_item(item_id, author=author, title=title, shelf_name=shelf_name)
+
+        # Verwijder cover cache zodat nieuwe cover gezocht wordt
+        db.set_setting(f"cover_{item_id}", "")
+
+        updated_item = db.get_wishlist_item(item_id)
+        return jsonify({'message': 'Item bijgewerkt', 'item': updated_item})
+    except Exception as e:
+        return jsonify({'error': f'Server fout: {str(e)}'}), 500
+
+
+@app.route('/api/cover/<int:item_id>', methods=['DELETE'])
+@requires_auth
+def api_delete_cover(item_id: int):
+    """Verwijder cover cache voor een item."""
+    user = get_current_user()
+    item = db.get_wishlist_item(item_id)
+
+    if not item:
+        return jsonify({'error': 'Item niet gevonden'}), 404
+
+    if user['role'] != 'admin' and item.get('user_id') != user['id']:
+        return jsonify({'error': 'Geen toegang'}), 403
+
+    db.set_setting(f"cover_{item_id}", "")
+    return jsonify({'message': 'Cover verwijderd'})
+
+
 @app.route('/api/wishlist/<int:item_id>', methods=['DELETE'])
 @requires_auth
 def api_delete_wishlist(item_id: int):

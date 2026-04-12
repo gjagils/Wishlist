@@ -302,6 +302,53 @@ def update_wishlist_status(
             )
 
 
+def update_wishlist_item(item_id: int, author: Optional[str] = None,
+                        title: Optional[str] = None,
+                        shelf_name: Optional[str] = None) -> bool:
+    """Update auteur, titel en/of plank van een wishlist item."""
+    with get_db() as conn:
+        updates = []
+        params = []
+
+        if author is not None:
+            updates.append("author = ?")
+            params.append(author)
+        if title is not None:
+            updates.append("title = ?")
+            params.append(title)
+        if shelf_name is not None:
+            updates.append("shelf_name = ?")
+            params.append(shelf_name if shelf_name else None)
+
+        if not updates:
+            return False
+
+        # Update ook raw_line
+        if author is not None or title is not None:
+            # Haal huidige waarden op voor raw_line
+            item = get_wishlist_item(item_id)
+            if item:
+                new_author = author if author is not None else item['author']
+                new_title = title if title is not None else item['title']
+                updates.append("raw_line = ?")
+                params.append(f'{new_author} - "{new_title}"')
+
+        params.append(item_id)
+        cursor = conn.execute(
+            f"UPDATE wishlist SET {', '.join(updates)} WHERE id = ?",
+            params
+        )
+
+        if cursor.rowcount > 0 and is_logging_enabled():
+            conn.execute(
+                """INSERT INTO logs (wishlist_id, level, message)
+                   VALUES (?, ?, ?)""",
+                (item_id, "info", "Item bewerkt")
+            )
+
+        return cursor.rowcount > 0
+
+
 def delete_wishlist_item(item_id: int) -> bool:
     """Verwijder item uit wishlist."""
     with get_db() as conn:

@@ -345,12 +345,12 @@ function renderWishlist() {
 
         let actionBtns = '';
         if (item.status !== 'searching') {
-            actionBtns += `<button class="card-btn" onclick="retrySearch(${item.id})"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>Search again</button>`;
+            actionBtns += `<button class="card-btn" onclick="event.stopPropagation();retrySearch(${item.id})"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/></svg>Search again</button>`;
         }
-        actionBtns += `<button class="card-btn btn-delete" onclick="deleteItem(${item.id}, '${escapeHtml(item.title)}')"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>Delete</button>`;
+        actionBtns += `<button class="card-btn btn-delete" onclick="event.stopPropagation();deleteItem(${item.id}, '${escapeHtml(item.title)}')"><svg viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>Delete</button>`;
 
         return `
-        <div class="book-card">
+        <div class="book-card" onclick="openEditModal(${item.id})" data-item='${JSON.stringify({id:item.id,author:item.author,title:item.title,shelf_name:item.shelf_name||''})}'>
             <div class="book-cover" data-item-id="${item.id}" style="background: ${gradient}">
                 <div class="book-cover-placeholder">
                     <div class="generated-cover">
@@ -455,6 +455,101 @@ function renderLogs(logs) {
             <span>${escapeHtml(log.message)}</span>
         </div>
     `).join('');
+}
+
+// ===== EDIT MODAL =====
+let editingItemId = null;
+
+function openEditModal(itemId) {
+    const item = wishlistData.items.find(i => i.id === itemId);
+    if (!item) return;
+
+    editingItemId = itemId;
+    document.getElementById('edit-id').value = itemId;
+    document.getElementById('edit-author').value = item.author || '';
+    document.getElementById('edit-title').value = item.title || '';
+
+    // Vul plank dropdown met dezelfde opties als het add-formulier
+    const editShelf = document.getElementById('edit-shelf');
+    const addShelf = document.getElementById('shelf');
+    editShelf.innerHTML = '<option value="">— Geen —</option>';
+    for (const opt of addShelf.options) {
+        if (opt.value) {
+            const newOpt = document.createElement('option');
+            newOpt.value = opt.value;
+            newOpt.textContent = opt.textContent;
+            if (opt.value === (item.shelf_name || '')) newOpt.selected = true;
+            editShelf.appendChild(newOpt);
+        }
+    }
+
+    document.getElementById('edit-message').className = 'toast-message';
+    document.getElementById('edit-modal').style.display = '';
+}
+
+function closeEditModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    document.getElementById('edit-modal').style.display = 'none';
+    editingItemId = null;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const itemId = document.getElementById('edit-id').value;
+        const author = document.getElementById('edit-author').value.trim();
+        const title = document.getElementById('edit-title').value.trim();
+        const shelfName = document.getElementById('edit-shelf').value;
+        const messageEl = document.getElementById('edit-message');
+
+        if (!author || !title) {
+            showMessage(messageEl, 'Auteur en titel zijn verplicht', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/wishlist/${itemId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ author, title, shelf_name: shelfName }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Verwijder cover uit cache zodat nieuwe cover gezocht wordt
+                coverCache.delete(itemId);
+                closeEditModal();
+                loadWishlist();
+                loadLogs();
+            } else {
+                showMessage(messageEl, data.error || 'Opslaan mislukt', 'error');
+            }
+        } catch (error) {
+            showMessage(messageEl, 'Netwerkfout: ' + error.message, 'error');
+        }
+    });
+
+    // Sluit modal met Escape
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeEditModal();
+    });
+});
+
+async function deleteCover() {
+    if (!editingItemId) return;
+
+    try {
+        const response = await fetch(`/api/cover/${editingItemId}`, { method: 'DELETE' });
+        if (response.ok) {
+            coverCache.delete(String(editingItemId));
+            showMessage(document.getElementById('edit-message'), 'Cover verwijderd', 'success');
+            loadWishlist();
+        }
+    } catch (error) {
+        showMessage(document.getElementById('edit-message'), 'Fout: ' + error.message, 'error');
+    }
 }
 
 // ===== UTILITY =====

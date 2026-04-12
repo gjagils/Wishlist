@@ -164,6 +164,36 @@
         </div>
     </main>
 
+    <!-- Edit Modal -->
+    <div class="modal-overlay" id="edit-modal" style="display:none" onclick="closeEditModal(event)">
+        <div class="modal-card" onclick="event.stopPropagation()">
+            <h2 class="section-title">Item bewerken</h2>
+            <form id="edit-form">
+                <input type="hidden" id="edit-id">
+                <div class="form-group">
+                    <label for="edit-author">AUTEUR</label>
+                    <input type="text" id="edit-author" required>
+                </div>
+                <div class="form-group">
+                    <label for="edit-title">TITEL</label>
+                    <input type="text" id="edit-title" required>
+                </div>
+                <div class="form-group" id="edit-shelf-group">
+                    <label for="edit-shelf">PLANK</label>
+                    <select id="edit-shelf">
+                        <option value="">— Geen —</option>
+                    </select>
+                </div>
+                <div class="edit-modal-actions">
+                    <button type="submit" class="btn-add">Opslaan</button>
+                    <button type="button" class="btn-modal-secondary" onclick="deleteCover()">Cover verwijderen</button>
+                    <button type="button" class="btn-modal-cancel" onclick="closeEditModal()">Annuleren</button>
+                </div>
+            </form>
+            <div id="edit-message" class="toast-message"></div>
+        </div>
+    </div>
+
     <!-- Mobile Bottom Nav -->
     <nav class="bottom-nav">
         <a href="http://boekjes.gerdjan.nl" class="bottom-nav-item" target="_blank">

@@ -774,6 +774,76 @@ body {
     font-weight: 500;
 }
 
+/* ===== Edit Modal ===== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 20px;
+}
+
+.modal-card {
+    background: var(--white);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    box-shadow: var(--shadow-lg);
+    width: 100%;
+    max-width: 480px;
+}
+
+.modal-card .form-group {
+    margin-bottom: 16px;
+}
+
+.edit-modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.btn-modal-secondary {
+    padding: 10px 18px;
+    background: var(--white);
+    color: var(--neutral-700);
+    border: 1.5px solid var(--neutral-200);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.btn-modal-secondary:hover {
+    border-color: var(--tertiary);
+    color: var(--tertiary);
+}
+
+.btn-modal-cancel {
+    padding: 10px 18px;
+    background: none;
+    color: var(--neutral-500);
+    border: none;
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+    cursor: pointer;
+    margin-left: auto;
+}
+
+.btn-modal-cancel:hover {
+    color: var(--neutral-700);
+}
+
+/* Clickable book card */
+.book-card {
+    cursor: pointer;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 1024px) {
     .main-content {
