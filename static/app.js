@@ -540,6 +540,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+async function searchNewCover() {
+    if (!editingItemId) return;
+    const msg = document.getElementById('edit-message');
+    showMessage(msg, 'Cover zoeken...', 'success');
+
+    try {
+        const response = await fetch(`/api/cover/${editingItemId}/refresh`, { method: 'POST' });
+        const data = await response.json();
+
+        coverCache.delete(String(editingItemId));
+
+        if (data.cover_url) {
+            showMessage(msg, 'Nieuwe cover gevonden!', 'success');
+            document.getElementById('edit-no-cover').checked = false;
+        } else {
+            showMessage(msg, 'Geen andere cover gevonden', 'error');
+        }
+        loadWishlist();
+    } catch (error) {
+        showMessage(msg, 'Fout: ' + error.message, 'error');
+    }
+}
+
 // ===== UTILITY =====
 function showMessage(element, message, type) {
     element.textContent = message;

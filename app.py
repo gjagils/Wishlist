@@ -425,13 +425,19 @@ def api_update_wishlist(item_id: int):
     no_cover = data.get('no_cover', False)
 
     try:
+        # Check of auteur/titel gewijzigd is
+        old_item = db.get_wishlist_item(item_id)
+        title_changed = old_item and (old_item['author'] != author or old_item['title'] != title)
+
         db.update_wishlist_item(item_id, author=author, title=title, shelf_name=shelf_name)
 
-        # Cover cache: skip of opnieuw zoeken
+        # Cover logica
         if no_cover:
             db.set_setting(f"cover_{item_id}", "skip")
-        else:
+        elif title_changed:
+            # Auteur/titel gewijzigd: opnieuw zoeken
             db.set_setting(f"cover_{item_id}", "")
+            db.set_setting(f"cover_rejected_{item_id}", "")  # Reset rejected lijst
 
         updated_item = db.get_wishlist_item(item_id)
         return jsonify({'message': 'Item bijgewerkt', 'item': updated_item})
@@ -439,22 +445,44 @@ def api_update_wishlist(item_id: int):
         return jsonify({'error': f'Server fout: {str(e)}'}), 500
 
 
-@app.route('/api/cover/<int:item_id>', methods=['DELETE'])
+@app.route('/api/cover/<int:item_id>/refresh', methods=['POST'])
 @requires_auth
-def api_delete_cover(item_id: int):
-    """Verwijder cover en markeer als 'niet zoeken'."""
+def api_refresh_cover(item_id: int):
+    """Zoek een andere cover, sla de huidige over."""
     user = get_current_user()
     item = db.get_wishlist_item(item_id)
 
     if not item:
-        return jsonify({'error': 'Item niet gevonden'}), 404
+        return jsonify({'cover_url': None}), 404
 
     if user['role'] != 'admin' and item.get('user_id') != user['id']:
         return jsonify({'error': 'Geen toegang'}), 403
 
-    # "skip" = niet opnieuw zoeken
-    db.set_setting(f"cover_{item_id}", "skip")
-    return jsonify({'message': 'Cover verwijderd'})
+    # Huidige cover onthouden als "rejected"
+    cache_key = f"cover_{item_id}"
+    rejected_key = f"cover_rejected_{item_id}"
+    current = db.get_setting(cache_key) or ''
+
+    # Laad bestaande rejected lijst
+    import json
+    rejected_raw = db.get_setting(rejected_key)
+    rejected = json.loads(rejected_raw) if rejected_raw else []
+    if current and current not in ('', 'skip') and current not in rejected:
+        rejected.append(current)
+    db.set_setting(rejected_key, json.dumps(rejected))
+
+    # Zoek nieuwe cover
+    cover_url = (
+        _fetch_google_books_cover(item['author'], item['title'], rejected) or
+        _fetch_openlibrary_cover(item['author'], item['title'], rejected)
+    )
+
+    if cover_url:
+        db.set_setting(cache_key, cover_url)
+        return jsonify({'cover_url': f"/api/cover-image/{item_id}"})
+    else:
+        db.set_setting(cache_key, 'skip')
+        return jsonify({'cover_url': None, 'message': 'Geen andere cover gevonden'})
 
 
 @app.route('/api/wishlist/<int:item_id>', methods=['DELETE'])
@@ -714,13 +742,13 @@ def _normalize_for_search(text: str) -> str:
     return text
 
 
-def _fetch_google_books_cover(author: str, title: str) -> str | None:
+def _fetch_google_books_cover(author: str, title: str, rejected: list = None) -> str | None:
     """Zoek boekcover via Google Books API met auteur+titel validatie."""
     import requests as req
     import urllib.parse
 
-    # Gebruik intitle: en inauthor: voor preciezere resultaten
-    # Pak alleen achternaam van auteur voor betere matching
+    rejected = rejected or []
+
     author_parts = author.strip().split()
     author_last = author_parts[-1] if author_parts else author
 
@@ -734,7 +762,7 @@ def _fetch_google_books_cover(author: str, title: str) -> str | None:
 
     for query in queries:
         try:
-            url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=5&fields=items(volumeInfo)"
+            url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=10&fields=items(volumeInfo)"
             resp = req.get(url, timeout=8)
             if resp.status_code != 200:
                 continue
@@ -747,7 +775,6 @@ def _fetch_google_books_cover(author: str, title: str) -> str | None:
                 if not cover:
                     continue
 
-                # Valideer: auteur en titel moeten matchen
                 result_title = _normalize_for_search(vol.get("title", ""))
                 result_authors = [_normalize_for_search(a) for a in vol.get("authors", [])]
 
@@ -758,6 +785,11 @@ def _fetch_google_books_cover(author: str, title: str) -> str | None:
                     cover = cover.replace("http://", "https://")
                     cover = cover.replace("&edge=curl", "")
                     cover = cover.replace("zoom=1", "zoom=2")
+
+                    # Sla rejected covers over
+                    if cover in rejected:
+                        continue
+
                     return cover
 
         except Exception:
@@ -766,7 +798,7 @@ def _fetch_google_books_cover(author: str, title: str) -> str | None:
     return None
 
 
-def _fetch_openlibrary_cover(author: str, title: str) -> str | None:
+def _fetch_openlibrary_cover(author: str, title: str, rejected: list = None) -> str | None:
     """Zoek boekcover via Open Library Search API."""
     import requests as req
     import urllib.parse
@@ -789,7 +821,10 @@ def _fetch_openlibrary_cover(author: str, title: str) -> str | None:
             for doc in docs:
                 cover_id = doc.get("cover_i")
                 if cover_id:
-                    return f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
+                    cover_url = f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
+                    if rejected and cover_url in rejected:
+                        continue
+                    return cover_url
 
         except Exception:
             continue

@@ -799,8 +799,16 @@ body {
     margin-bottom: 16px;
 }
 
-.edit-options {
-    margin-top: 12px;
+.edit-cover-section {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--neutral-200);
+}
+
+.edit-cover-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
 }
 
 .edit-checkbox {

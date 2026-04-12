@@ -184,11 +184,15 @@
                         <option value="">— Geen —</option>
                     </select>
                 </div>
-                <div class="edit-options">
-                    <label class="edit-checkbox">
-                        <input type="checkbox" id="edit-no-cover">
-                        Geen cover zoeken voor dit boek
-                    </label>
+                <div class="edit-cover-section">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:8px">COVER</label>
+                    <div class="edit-cover-actions">
+                        <button type="button" class="btn-modal-secondary" onclick="searchNewCover()">Andere cover zoeken</button>
+                        <label class="edit-checkbox">
+                            <input type="checkbox" id="edit-no-cover">
+                            Geen cover
+                        </label>
+                    </div>
                 </div>
                 <div class="edit-modal-actions">
                     <button type="submit" class="btn-add">Opslaan</button>
