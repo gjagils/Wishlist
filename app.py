@@ -339,8 +339,51 @@ def api_add_wishlist():
         )
 
         item = db.get_wishlist_item(item_id)
+
+        # Direct zoeken in achtergrondthread (volledig traject)
+        def _search_new_item():
+            import time
+            try:
+                from worker import process_item
+                fresh = db.get_wishlist_item(item_id)
+                if not fresh or fresh['status'] != 'pending':
+                    return
+                process_item(fresh)
+
+                # Als importing: poll Calibre-Web tot eindstatus
+                fresh = db.get_wishlist_item(item_id)
+                if not fresh or fresh['status'] != 'importing':
+                    return
+                sn = fresh.get('shelf_name')
+                if not sn or not calibreweb.is_configured():
+                    return
+                for _ in range(40):
+                    time.sleep(15)
+                    try:
+                        book_id = calibreweb.search_book(fresh['author'], fresh['title'])
+                        if book_id:
+                            ok = calibreweb.add_book_to_shelf(sn, book_id)
+                            if ok:
+                                db.update_wishlist_status(item_id, 'shelved')
+                                db.add_log(item_id, 'info', f'✓ Op plank: {sn} (book_id={book_id})')
+                                try:
+                                    import email_sender
+                                    email_sender.notify_item_shelved(fresh)
+                                except Exception:
+                                    pass
+                            else:
+                                db.update_wishlist_status(item_id, 'found')
+                            return
+                    except Exception:
+                        pass
+            except Exception as e:
+                db.add_log(item_id, 'error', f'Auto-zoek fout: {e}')
+
+        thread = threading.Thread(target=_search_new_item, daemon=True)
+        thread.start()
+
         return jsonify({
-            'message': 'Item toegevoegd',
+            'message': 'Item toegevoegd, zoekactie gestart',
             'item': item
         }), 201
 
