@@ -397,6 +397,16 @@ def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
         return row["value"] if row else default
 
 
+def delete_settings_by_prefix(prefix: str) -> int:
+    """Verwijder alle settings met een bepaald prefix."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "DELETE FROM settings WHERE key LIKE ?",
+            (f"{prefix}%",)
+        )
+        return cursor.rowcount
+
+
 def set_setting(key: str, value: str) -> None:
     """Sla setting op."""
     with get_db() as conn:

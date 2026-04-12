@@ -542,33 +542,62 @@ def api_cover_image(item_id: int):
         return Response(status=502)
 
 
+def _normalize_for_search(text: str) -> str:
+    """Normaliseer tekst voor zoekopdrachten."""
+    import unicodedata
+    text = unicodedata.normalize("NFD", text.lower())
+    text = "".join(c for c in text if unicodedata.category(c) != "Mn")
+    return text
+
+
 def _fetch_google_books_cover(author: str, title: str) -> str | None:
-    """Zoek boekcover via Google Books API (gratis, geen auth)."""
+    """Zoek boekcover via Google Books API met auteur+titel validatie."""
     import requests as req
     import urllib.parse
 
-    query = urllib.parse.quote(f"{title} {author}")
-    try:
-        url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=3&fields=items(volumeInfo/imageLinks)"
-        resp = req.get(url, timeout=8)
-        if resp.status_code != 200:
-            return None
+    # Gebruik intitle: en inauthor: voor preciezere resultaten
+    # Pak alleen achternaam van auteur voor betere matching
+    author_parts = author.strip().split()
+    author_last = author_parts[-1] if author_parts else author
 
-        data = resp.json()
-        for item in data.get("items", []):
-            links = item.get("volumeInfo", {}).get("imageLinks", {})
-            # Prefer thumbnail, upgrade to larger size
-            cover = links.get("thumbnail") or links.get("smallThumbnail")
-            if cover:
-                # Google Books geeft http URL, upgrade naar https
-                # en verwijder edge=curl parameter voor schonere afbeelding
-                cover = cover.replace("http://", "https://")
-                cover = cover.replace("&edge=curl", "")
-                # Upgrade zoom level voor hogere resolutie
-                cover = cover.replace("zoom=1", "zoom=2")
-                return cover
-    except Exception:
-        pass
+    queries = [
+        f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author_last)}",
+        f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author)}",
+    ]
+
+    norm_author = _normalize_for_search(author_last)
+    norm_title = _normalize_for_search(title)
+
+    for query in queries:
+        try:
+            url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=5&fields=items(volumeInfo)"
+            resp = req.get(url, timeout=8)
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            for item in data.get("items", []):
+                vol = item.get("volumeInfo", {})
+                links = vol.get("imageLinks", {})
+                cover = links.get("thumbnail") or links.get("smallThumbnail")
+                if not cover:
+                    continue
+
+                # Valideer: auteur en titel moeten matchen
+                result_title = _normalize_for_search(vol.get("title", ""))
+                result_authors = [_normalize_for_search(a) for a in vol.get("authors", [])]
+
+                title_ok = norm_title in result_title or result_title in norm_title
+                author_ok = any(norm_author in a or a in norm_author for a in result_authors)
+
+                if title_ok and author_ok:
+                    cover = cover.replace("http://", "https://")
+                    cover = cover.replace("&edge=curl", "")
+                    cover = cover.replace("zoom=1", "zoom=2")
+                    return cover
+
+        except Exception:
+            continue
 
     return None
 
@@ -752,6 +781,15 @@ def api_admin_delete_user(user_id: int):
         return jsonify({'message': 'Gebruiker verwijderd'})
     else:
         return jsonify({'error': 'Gebruiker niet gevonden'}), 404
+
+
+@app.route('/api/admin/reset-covers', methods=['POST'])
+@requires_auth
+@requires_admin
+def api_admin_reset_covers():
+    """Reset alle cover caches zodat covers opnieuw gezocht worden."""
+    count = db.delete_settings_by_prefix("cover_")
+    return jsonify({'message': f'{count} cover cache(s) gewist'})
 
 
 @app.route('/api/health', methods=['GET'])
