@@ -476,17 +476,59 @@ def api_retry_search(item_id: int):
     db.update_wishlist_status(item_id, 'pending', error_message=None)
     db.add_log(item_id, 'info', 'Handmatig opnieuw zoeken gestart')
 
-    # Direct zoeken in achtergrondthread
-    def _search_single():
+    # Volledig traject in achtergrondthread: zoek → download → poll → plank
+    def _search_and_follow():
+        import time
         try:
             from worker import process_item
             fresh_item = db.get_wishlist_item(item_id)
-            if fresh_item and fresh_item['status'] == 'pending':
-                process_item(fresh_item)
+            if not fresh_item or fresh_item['status'] != 'pending':
+                return
+
+            # Stap 1: zoek in Spotweb en stuur naar SABnzbd
+            process_item(fresh_item)
+
+            # Stap 2: als status nu 'importing', poll Calibre-Web tot eindstatus
+            item = db.get_wishlist_item(item_id)
+            if not item or item['status'] != 'importing':
+                return  # Niet gevonden of al klaar
+
+            shelf_name = item.get('shelf_name')
+            if not shelf_name or not calibreweb.is_configured():
+                return
+
+            db.add_log(item_id, 'info', 'Wachten op Calibre-Web import...')
+
+            # Poll elke 15 sec, max 10 minuten
+            for attempt in range(40):
+                time.sleep(15)
+                try:
+                    book_id = calibreweb.search_book(item['author'], item['title'])
+                    if book_id:
+                        success = calibreweb.add_book_to_shelf(shelf_name, book_id)
+                        if success:
+                            db.update_wishlist_status(item_id, 'shelved')
+                            db.add_log(item_id, 'info',
+                                       f'✓ Op boekenplank gezet: {shelf_name} (book_id={book_id})')
+                            try:
+                                import email_sender
+                                email_sender.notify_item_shelved(item)
+                            except Exception:
+                                pass
+                        else:
+                            db.update_wishlist_status(item_id, 'found')
+                            db.add_log(item_id, 'info',
+                                       f'Boek gevonden (book_id={book_id}) maar plank mislukt')
+                        return  # Eindstatus bereikt
+                except Exception:
+                    pass
+
+            db.add_log(item_id, 'info', 'Import check timeout na 10 min, worker neemt het over')
+
         except Exception as e:
             db.add_log(item_id, 'error', f'Zoekfout: {e}')
 
-    thread = threading.Thread(target=_search_single, daemon=True)
+    thread = threading.Thread(target=_search_and_follow, daemon=True)
     thread.start()
 
     return jsonify({'message': 'Zoekactie gestart'}), 202
