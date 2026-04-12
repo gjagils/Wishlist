@@ -8,7 +8,7 @@ import os
 import re
 import threading
 from functools import wraps
-from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory
+from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory, Response
 from werkzeug.security import check_password_hash, generate_password_hash
 
 import database as db
@@ -61,6 +61,52 @@ def requires_admin(f):
 
 
 # ===== AUTH ROUTES =====
+
+@app.route('/autologin', methods=['GET'])
+def autologin():
+    """Auto-login via HMAC-signed URL. Voor links vanuit Calibre-Web."""
+    import hmac
+    import hashlib
+
+    username = request.args.get('user', '')
+    token = request.args.get('token', '')
+    ts = request.args.get('ts', '')
+
+    if not username or not token:
+        return redirect(url_for('login'))
+
+    # Valideer HMAC token
+    secret = app.config['SECRET_KEY']
+    expected = hmac.new(
+        secret.encode(), f"{username}:{ts}".encode(), hashlib.sha256
+    ).hexdigest()[:32]
+
+    if not hmac.compare_digest(token, expected):
+        return redirect(url_for('login'))
+
+    # Optioneel: check timestamp (token max 30 dagen geldig)
+    if ts:
+        try:
+            from datetime import datetime
+            token_time = datetime.fromisoformat(ts)
+            age = (datetime.now() - token_time).days
+            if age > 30:
+                return redirect(url_for('login'))
+        except Exception:
+            pass
+
+    # Auto-registratie
+    user = db.get_user(username)
+    if not user:
+        db.create_user(username=username)
+        user = db.get_user(username)
+
+    db.update_user_login(username)
+    session['username'] = username
+    session.permanent = True
+
+    return redirect('/')
+
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -430,7 +476,7 @@ def api_get_cover(item_id: int):
     cache_key = f"cover_{item_id}"
     cached = db.get_setting(cache_key)
     if cached is not None and cached != '':
-        return jsonify({'cover_url': cached})
+        return jsonify({'cover_url': f"/api/cover-image/{item_id}"})
 
     # Fallback chain
     cover_url = (
@@ -441,7 +487,42 @@ def api_get_cover(item_id: int):
     # Cache resultaat (ook lege string = "niet gevonden")
     db.set_setting(cache_key, cover_url or '')
 
-    return jsonify({'cover_url': cover_url})
+    # Geef proxy URL terug zodat frontend geen CORS issues heeft
+    if cover_url:
+        import base64
+        proxy_url = f"/api/cover-image/{item_id}"
+        return jsonify({'cover_url': proxy_url})
+
+    return jsonify({'cover_url': None})
+
+
+@app.route('/api/cover-image/<int:item_id>', methods=['GET'])
+@requires_auth
+def api_cover_image(item_id: int):
+    """Proxy voor boekcover afbeeldingen — voorkomt CORS issues."""
+    import requests as req
+
+    cache_key = f"cover_{item_id}"
+    cover_url = db.get_setting(cache_key)
+
+    if not cover_url:
+        return Response(status=404)
+
+    try:
+        resp = req.get(cover_url, timeout=10, headers={
+            'User-Agent': 'Mozilla/5.0 (compatible; WishlistBot/1.0)'
+        })
+        if resp.status_code != 200:
+            return Response(status=resp.status_code)
+
+        content_type = resp.headers.get('Content-Type', 'image/jpeg')
+        return Response(
+            resp.content,
+            content_type=content_type,
+            headers={'Cache-Control': 'public, max-age=86400'}  # 24h cache
+        )
+    except Exception:
+        return Response(status=502)
 
 
 def _fetch_google_books_cover(author: str, title: str) -> str | None:
@@ -595,8 +676,22 @@ def api_update_settings():
 @requires_auth
 @requires_admin
 def api_admin_get_users():
-    """Haal alle users op (admin only)."""
+    """Haal alle users op met auto-login links (admin only)."""
+    import hmac
+    import hashlib
+    from datetime import datetime
+
     users = db.get_all_users()
+
+    # Genereer auto-login URL per user
+    secret = app.config['SECRET_KEY']
+    ts = datetime.now().isoformat()
+    for user in users:
+        token = hmac.new(
+            secret.encode(), f"{user['username']}:{ts}".encode(), hashlib.sha256
+        ).hexdigest()[:32]
+        user['autologin_url'] = f"/autologin?user={user['username']}&token={token}&ts={ts}"
+
     return jsonify({'users': users})
 
 

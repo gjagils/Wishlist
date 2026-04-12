@@ -35,6 +35,8 @@ async function loadCurrentUser() {
         if (currentUser.role === 'admin') {
             const navAdmin = document.getElementById('nav-admin');
             if (navAdmin) navAdmin.style.display = '';
+            const logsCard = document.getElementById('logs-card');
+            if (logsCard) logsCard.style.display = '';
         }
     } catch (error) {
         console.error('Error loading user:', error);
@@ -396,41 +398,40 @@ function renderWishlist() {
 // ===== COVER LOADING =====
 const coverCache = new Map();
 
-async function loadCovers() {
+function loadCovers() {
     const coverEls = document.querySelectorAll('.book-cover[data-item-id]');
 
-    for (const el of coverEls) {
+    coverEls.forEach(el => {
         const itemId = el.dataset.itemId;
-        if (!itemId) continue;
+        if (!itemId) return;
 
         // Check in-memory cache
         if (coverCache.has(itemId)) {
             const url = coverCache.get(itemId);
             if (url) applyCover(el, url);
-            continue;
+            return;
         }
 
-        // Fetch van backend (die cached in DB)
-        try {
-            const response = await fetch(`/api/cover/${itemId}`);
-            if (!response.ok) continue;
-
-            const data = await response.json();
-            coverCache.set(itemId, data.cover_url);
-
-            if (data.cover_url) {
-                applyCover(el, data.cover_url);
-            }
-        } catch (e) {
-            // Silently skip
-        }
-    }
+        // Fetch van backend (parallel, niet sequentieel)
+        fetch(`/api/cover/${itemId}`)
+            .then(resp => resp.ok ? resp.json() : null)
+            .then(data => {
+                if (!data) return;
+                coverCache.set(itemId, data.cover_url);
+                if (data.cover_url) {
+                    applyCover(el, data.cover_url);
+                }
+            })
+            .catch(() => {});
+    });
 }
 
 function applyCover(el, url) {
     const img = new Image();
     img.onload = () => {
-        el.style.background = `url('${url}') center/cover no-repeat`;
+        el.style.backgroundImage = `url('${url}')`;
+        el.style.backgroundSize = 'cover';
+        el.style.backgroundPosition = 'center';
         const placeholder = el.querySelector('.book-cover-placeholder');
         if (placeholder) placeholder.style.display = 'none';
     };

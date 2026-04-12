@@ -318,6 +318,18 @@
                                 </div>
                             </div>
                         </div>
+                        ${user.autologin_url ? `
+                        <div class="form-group" style="margin-top:12px">
+                            <label>AUTO-LOGIN LINK</label>
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <input type="text" readonly value="${window.location.origin}${esc(user.autologin_url)}"
+                                    id="autolink-${user.id}"
+                                    style="font-size:0.75rem;color:var(--neutral-500);background:var(--white)">
+                                <button class="btn-cancel" onclick="copyAutolink(${user.id})" style="white-space:nowrap">Kopieer</button>
+                            </div>
+                            <p style="font-size:0.7rem;color:var(--neutral-300);margin-top:4px">Plak deze link in Calibre-Web. Geldig voor 30 dagen.</p>
+                        </div>
+                        ` : ''}
                         <div class="edit-actions">
                             <button class="btn-save" onclick="saveUser(${user.id})">Opslaan</button>
                             <button class="btn-cancel" onclick="toggleEdit(${user.id})">Annuleren</button>
@@ -364,6 +376,15 @@
             } catch (error) {
                 alert('Netwerkfout: ' + error.message);
             }
+        }
+
+        function copyAutolink(userId) {
+            const input = document.getElementById(`autolink-${userId}`);
+            input.select();
+            navigator.clipboard.writeText(input.value).then(() => {
+                input.style.borderColor = 'var(--primary)';
+                setTimeout(() => input.style.borderColor = '', 2000);
+            });
         }
 
         function esc(text) {

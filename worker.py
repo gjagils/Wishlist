@@ -310,15 +310,71 @@ def check_importing_items() -> None:
         time.sleep(2)
 
 
+CALIBRE_CHECK_SECONDS = int(os.environ.get("CALIBRE_CHECK_SECONDS", "86400"))  # 24 uur
+
+
+def check_existing_in_calibre() -> None:
+    """
+    Check of pending items al in Calibre-Web bestaan.
+    Voorkomt dubbele downloads — als een boek al in de bibliotheek staat,
+    wordt het direct op de plank gezet of als 'found' gemarkeerd.
+    """
+    if not calibreweb.is_configured():
+        return
+
+    pending = db.get_wishlist_items(status='pending')
+    if not pending:
+        return
+
+    for item in pending:
+        item_id = item['id']
+        author = item['author']
+        title = item['title']
+        shelf_name = item.get('shelf_name')
+
+        try:
+            book_id = calibreweb.search_book(author, title)
+            if not book_id:
+                continue
+
+            # Boek bestaat al in Calibre-Web!
+            if shelf_name:
+                success = calibreweb.add_book_to_shelf(shelf_name, book_id)
+                if success:
+                    db.update_wishlist_status(item_id, "shelved")
+                    db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre → op plank gezet: {shelf_name} (book_id={book_id})")
+                    try:
+                        email_sender.notify_item_shelved(item)
+                    except Exception:
+                        pass
+                else:
+                    db.update_wishlist_status(item_id, "found")
+                    db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre (book_id={book_id}) maar plank toevoegen mislukt")
+            else:
+                db.update_wishlist_status(item_id, "found")
+                db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre (book_id={book_id})")
+
+        except Exception as e:
+            db.add_log(item_id, "error", f"Calibre-Web check fout: {e}")
+
+        time.sleep(2)
+
+
 def worker_loop() -> None:
     """Main worker loop."""
     print("Worker gestart")
 
     last_search_time = 0
+    last_calibre_check = 0
 
     while True:
         try:
             now = time.time()
+
+            # Dagelijkse check: bestaan pending items al in Calibre-Web?
+            if now - last_calibre_check >= CALIBRE_CHECK_SECONDS:
+                check_existing_in_calibre()
+                last_calibre_check = time.time()
 
             if now - last_search_time >= INTERVAL_SECONDS:
                 pending_items = db.get_wishlist_items(status='pending')
