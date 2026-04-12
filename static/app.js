@@ -37,10 +37,61 @@ async function loadCurrentUser() {
             if (navAdmin) navAdmin.style.display = '';
             const logsCard = document.getElementById('logs-card');
             if (logsCard) logsCard.style.display = '';
+            loadUsersForAdmin();
         }
     } catch (error) {
         console.error('Error loading user:', error);
     }
+}
+
+let allUsers = [];
+
+async function loadUsersForAdmin() {
+    try {
+        const response = await fetch('/api/admin/users');
+        if (!response.ok) return;
+        const data = await response.json();
+        allUsers = data.users;
+
+        const select = document.getElementById('onbehalf');
+        const group = document.getElementById('onbehalf-group');
+        if (!select || !group) return;
+
+        data.users.forEach(user => {
+            if (user.username === currentUser.username) return;
+            const option = document.createElement('option');
+            option.value = user.id;
+            option.textContent = user.username;
+            select.appendChild(option);
+        });
+
+        // Bij wijziging van user: update plank-dropdown met hun planken
+        select.addEventListener('change', () => {
+            const shelfSelect = document.getElementById('shelf');
+            if (!shelfSelect) return;
+
+            if (!select.value) {
+                // Terug naar mezelf: toon alle planken
+                loadShelves();
+                return;
+            }
+
+            const targetUser = allUsers.find(u => u.id === parseInt(select.value));
+            if (!targetUser || !targetUser.allowed_shelves) return;
+
+            // Filter plank-dropdown naar planken van geselecteerde user
+            const currentOptions = Array.from(shelfSelect.options).map(o => o.value);
+            shelfSelect.innerHTML = '';
+            targetUser.allowed_shelves.forEach(name => {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                shelfSelect.appendChild(opt);
+            });
+        });
+
+        group.style.display = '';
+    } catch (e) {}
 }
 
 // ===== EVENT LISTENERS =====
@@ -135,6 +186,12 @@ async function handleAddItem(e) {
 
     const body = { author, title };
     if (shelfName) body.shelf_name = shelfName;
+
+    // Admin kan voor een andere gebruiker toevoegen
+    const onbehalfSelect = document.getElementById('onbehalf');
+    if (onbehalfSelect && onbehalfSelect.value) {
+        body.on_behalf_of = parseInt(onbehalfSelect.value);
+    }
 
     try {
         const response = await fetch('/api/wishlist', {

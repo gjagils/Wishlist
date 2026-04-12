@@ -320,6 +320,17 @@ def api_add_wishlist():
 
     shelf_name = data.get('shelf_name')
 
+    # Admin kan namens een andere gebruiker toevoegen
+    target_user_id = user['id']
+    on_behalf_of = data.get('on_behalf_of')
+    if on_behalf_of and user['role'] == 'admin':
+        target_user = db.get_user_by_id(on_behalf_of)
+        if target_user:
+            target_user_id = target_user['id']
+            # Als admin geen plank kiest, gebruik de eerste plank van de target user
+            if not shelf_name and target_user.get('allowed_shelves'):
+                shelf_name = target_user['allowed_shelves'][0]
+
     # Valideer plank-toegang voor gewone users
     if user['role'] != 'admin' and shelf_name:
         if not user['allowed_shelves'] or shelf_name not in user['allowed_shelves']:
@@ -335,7 +346,7 @@ def api_add_wishlist():
             title=title,
             added_via=data.get('added_via', 'web'),
             shelf_name=shelf_name,
-            user_id=user['id']
+            user_id=target_user_id
         )
 
         item = db.get_wishlist_item(item_id)
