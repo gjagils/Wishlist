@@ -394,7 +394,7 @@ def api_update_wishlist(item_id: int):
 @app.route('/api/cover/<int:item_id>', methods=['DELETE'])
 @requires_auth
 def api_delete_cover(item_id: int):
-    """Verwijder cover cache voor een item."""
+    """Verwijder cover en markeer als 'niet zoeken'."""
     user = get_current_user()
     item = db.get_wishlist_item(item_id)
 
@@ -404,7 +404,8 @@ def api_delete_cover(item_id: int):
     if user['role'] != 'admin' and item.get('user_id') != user['id']:
         return jsonify({'error': 'Geen toegang'}), 403
 
-    db.set_setting(f"cover_{item_id}", "")
+    # "skip" = niet opnieuw zoeken
+    db.set_setting(f"cover_{item_id}", "skip")
     return jsonify({'message': 'Cover verwijderd'})
 
 
@@ -547,9 +548,11 @@ def api_get_cover(item_id: int):
     if not item:
         return jsonify({'cover_url': None}), 404
 
-    # Check cache eerst (skip lege cache = opnieuw zoeken met nieuwe providers)
+    # Check cache
     cache_key = f"cover_{item_id}"
     cached = db.get_setting(cache_key)
+    if cached == 'skip':
+        return jsonify({'cover_url': None})  # Gebruiker wil geen cover
     if cached is not None and cached != '':
         return jsonify({'cover_url': f"/api/cover-image/{item_id}"})
 
