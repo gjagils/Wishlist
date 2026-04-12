@@ -464,7 +464,7 @@ def api_bulk_delete_wishlist():
 @app.route('/api/wishlist/<int:item_id>/retry', methods=['POST'])
 @requires_auth
 def api_retry_search(item_id: int):
-    """Zet item terug naar pending zodat worker opnieuw zoekt."""
+    """Zoek direct opnieuw naar dit item (in achtergrondthread)."""
     user = get_current_user()
     item = db.get_wishlist_item(item_id)
     if not item:
@@ -476,7 +476,20 @@ def api_retry_search(item_id: int):
     db.update_wishlist_status(item_id, 'pending', error_message=None)
     db.add_log(item_id, 'info', 'Handmatig opnieuw zoeken gestart')
 
-    return jsonify({'message': 'Zoekactie opnieuw gestart'}), 200
+    # Direct zoeken in achtergrondthread
+    def _search_single():
+        try:
+            from worker import process_item
+            fresh_item = db.get_wishlist_item(item_id)
+            if fresh_item and fresh_item['status'] == 'pending':
+                process_item(fresh_item)
+        except Exception as e:
+            db.add_log(item_id, 'error', f'Zoekfout: {e}')
+
+    thread = threading.Thread(target=_search_single, daemon=True)
+    thread.start()
+
+    return jsonify({'message': 'Zoekactie gestart'}), 202
 
 
 # Lock om te voorkomen dat meerdere zoekacties tegelijk draaien
