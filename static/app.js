@@ -483,6 +483,8 @@ function openEditModal(itemId) {
         }
     }
 
+    document.getElementById('edit-no-cover').checked = false;
+
     document.getElementById('edit-message').className = 'toast-message';
     document.getElementById('edit-modal').style.display = '';
 }
@@ -501,6 +503,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const author = document.getElementById('edit-author').value.trim();
         const title = document.getElementById('edit-title').value.trim();
         const shelfName = document.getElementById('edit-shelf').value;
+        const noCover = document.getElementById('edit-no-cover').checked;
         const messageEl = document.getElementById('edit-message');
 
         if (!author || !title) {
@@ -512,7 +515,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`/api/wishlist/${itemId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ author, title, shelf_name: shelfName }),
+                body: JSON.stringify({ author, title, shelf_name: shelfName, no_cover: noCover }),
             });
 
             const data = await response.json();
@@ -536,21 +539,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') closeEditModal();
     });
 });
-
-async function deleteCover() {
-    if (!editingItemId) return;
-
-    try {
-        const response = await fetch(`/api/cover/${editingItemId}`, { method: 'DELETE' });
-        if (response.ok) {
-            coverCache.delete(String(editingItemId));
-            showMessage(document.getElementById('edit-message'), 'Cover verwijderd', 'success');
-            loadWishlist();
-        }
-    } catch (error) {
-        showMessage(document.getElementById('edit-message'), 'Fout: ' + error.message, 'error');
-    }
-}
 
 // ===== UTILITY =====
 function showMessage(element, message, type) {

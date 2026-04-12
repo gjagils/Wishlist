@@ -799,6 +799,25 @@ body {
     margin-bottom: 16px;
 }
 
+.edit-options {
+    margin-top: 12px;
+}
+
+.edit-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    color: var(--neutral-700);
+    cursor: pointer;
+}
+
+.edit-checkbox input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary);
+}
+
 .edit-modal-actions {
     display: flex;
     gap: 10px;

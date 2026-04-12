@@ -379,11 +379,16 @@ def api_update_wishlist(item_id: int):
         if not user['allowed_shelves'] or shelf_name not in user['allowed_shelves']:
             return jsonify({'error': 'Je hebt geen toegang tot deze boekenplank'}), 403
 
+    no_cover = data.get('no_cover', False)
+
     try:
         db.update_wishlist_item(item_id, author=author, title=title, shelf_name=shelf_name)
 
-        # Verwijder cover cache zodat nieuwe cover gezocht wordt
-        db.set_setting(f"cover_{item_id}", "")
+        # Cover cache: skip of opnieuw zoeken
+        if no_cover:
+            db.set_setting(f"cover_{item_id}", "skip")
+        else:
+            db.set_setting(f"cover_{item_id}", "")
 
         updated_item = db.get_wishlist_item(item_id)
         return jsonify({'message': 'Item bijgewerkt', 'item': updated_item})
