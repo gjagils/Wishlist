@@ -904,6 +904,38 @@ def api_admin_delete_user(user_id: int):
         return jsonify({'error': 'Gebruiker niet gevonden'}), 404
 
 
+@app.route('/api/admin/email-templates', methods=['GET'])
+@requires_auth
+@requires_admin
+def api_admin_get_email_templates():
+    """Haal e-mail templates op."""
+    from email_sender import DEFAULT_FOUND_SUBJECT, DEFAULT_FOUND_BODY
+    from email_sender import DEFAULT_SHELVED_SUBJECT, DEFAULT_SHELVED_BODY
+
+    return jsonify({
+        'found_subject': db.get_setting('email_found_subject', DEFAULT_FOUND_SUBJECT),
+        'found_body': db.get_setting('email_found_body', DEFAULT_FOUND_BODY),
+        'shelved_subject': db.get_setting('email_shelved_subject', DEFAULT_SHELVED_SUBJECT),
+        'shelved_body': db.get_setting('email_shelved_body', DEFAULT_SHELVED_BODY),
+    })
+
+
+@app.route('/api/admin/email-templates', methods=['PUT'])
+@requires_auth
+@requires_admin
+def api_admin_update_email_templates():
+    """Update e-mail templates."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Geen data ontvangen'}), 400
+
+    for key in ['found_subject', 'found_body', 'shelved_subject', 'shelved_body']:
+        if key in data:
+            db.set_setting(f'email_{key}', data[key])
+
+    return jsonify({'message': 'E-mail templates opgeslagen'})
+
+
 @app.route('/api/admin/reset-covers', methods=['POST'])
 @requires_auth
 @requires_admin

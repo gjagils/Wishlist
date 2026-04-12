@@ -73,29 +73,55 @@ def _get_notification_emails(item: dict) -> List[str]:
     return list(emails)
 
 
+# Default e-mail templates. Placeholders: {title}, {author}, {shelf}
+DEFAULT_FOUND_SUBJECT = "📖 {title} - {author} wordt gedownload"
+DEFAULT_FOUND_BODY = """Hoi!
+
+Goed nieuws — "{title}" van {author} is gevonden en wordt nu gedownload.
+
+Je hoeft niks te doen, je krijgt nog een mailtje als het klaar staat.
+
+Groetjes,
+Boekjes van Gerd-Jan
+https://wishlist.gerdjan.nl"""
+
+DEFAULT_SHELVED_SUBJECT = "📚 {title} staat klaar!"
+DEFAULT_SHELVED_BODY = """Hoi!
+
+"{title}" van {author} staat klaar op je boekenplank ({shelf})!
+
+Open Calibre-Web om het boek te lezen:
+https://boekjes.gerdjan.nl
+
+Of ga naar je Wishlist:
+https://wishlist.gerdjan.nl
+
+Veel leesplezier!
+
+Groetjes,
+Boekjes van Gerd-Jan"""
+
+
+def _render_template(template: str, item: dict) -> str:
+    """Vervang placeholders in een template."""
+    return template.format(
+        title=item.get("title", "Onbekend"),
+        author=item.get("author", "Onbekend"),
+        shelf=item.get("shelf_name", ""),
+    )
+
+
 def notify_item_found(item: dict) -> None:
-    """Stuur notificatie dat een boek gevonden is in Spotweb."""
+    """Stuur notificatie dat een boek gevonden is."""
     emails = _get_notification_emails(item)
     if not emails:
         return
 
-    author = item.get("author", "Onbekend")
-    title = item.get("title", "Onbekend")
-    shelf = item.get("shelf_name", "")
+    subject_tpl = db.get_setting("email_found_subject", DEFAULT_FOUND_SUBJECT)
+    body_tpl = db.get_setting("email_found_body", DEFAULT_FOUND_BODY)
 
-    subject = f"Boek gevonden: {author} - {title}"
-    body = f"""Goed nieuws! Het boek is gevonden op Spotweb en wordt gedownload.
-
-Auteur: {author}
-Titel: {title}
-{f"Boekenplank: {shelf}" if shelf else ""}
-
-Het boek wordt nu gedownload via SABnzbd.
-{"Zodra het geimporteerd is in Calibre wordt het op de plank gezet." if shelf else ""}
-
-— Wishlist"""
-
-    send_notification(emails, subject, body)
+    send_notification(emails, _render_template(subject_tpl, item),
+                      _render_template(body_tpl, item))
 
 
 def notify_item_shelved(item: dict) -> None:
@@ -104,19 +130,8 @@ def notify_item_shelved(item: dict) -> None:
     if not emails:
         return
 
-    author = item.get("author", "Onbekend")
-    title = item.get("title", "Onbekend")
-    shelf = item.get("shelf_name", "")
+    subject_tpl = db.get_setting("email_shelved_subject", DEFAULT_SHELVED_SUBJECT)
+    body_tpl = db.get_setting("email_shelved_body", DEFAULT_SHELVED_BODY)
 
-    subject = f"Boek op plank: {author} - {title}"
-    body = f"""Het boek is succesvol geimporteerd en op de boekenplank gezet!
-
-Auteur: {author}
-Titel: {title}
-Boekenplank: {shelf}
-
-Je kunt het boek nu lezen in Calibre-Web.
-
-— Wishlist"""
-
-    send_notification(emails, subject, body)
+    send_notification(emails, _render_template(subject_tpl, item),
+                      _render_template(body_tpl, item))

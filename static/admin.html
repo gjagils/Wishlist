@@ -221,6 +221,40 @@
         <div id="users-container">
             <div style="text-align:center; padding:40px; color:var(--neutral-500)">Laden...</div>
         </div>
+
+        <div class="card" style="background:var(--white);border-radius:12px;padding:24px 28px;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-top:20px">
+            <h2 style="font-family:var(--font-heading);font-size:1.1rem;font-weight:600;margin-bottom:18px;border-bottom:2px solid var(--neutral-200);padding-bottom:10px">E-mail templates</h2>
+            <p style="color:var(--neutral-500);font-size:0.8rem;margin-bottom:16px">
+                Gebruik <code>{title}</code>, <code>{author}</code> en <code>{shelf}</code> als placeholders.
+            </p>
+
+            <div style="margin-bottom:20px">
+                <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:10px;color:var(--primary)">Gevonden-mail</h3>
+                <div class="form-group">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">ONDERWERP</label>
+                    <input type="text" id="tpl-found-subject" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.9rem">
+                </div>
+                <div class="form-group" style="margin-top:10px">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">TEKST</label>
+                    <textarea id="tpl-found-body" rows="6" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.85rem;resize:vertical"></textarea>
+                </div>
+            </div>
+
+            <div style="margin-bottom:20px">
+                <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:10px;color:var(--primary)">Klaar-mail</h3>
+                <div class="form-group">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">ONDERWERP</label>
+                    <input type="text" id="tpl-shelved-subject" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.9rem">
+                </div>
+                <div class="form-group" style="margin-top:10px">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">TEKST</label>
+                    <textarea id="tpl-shelved-body" rows="8" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.85rem;resize:vertical"></textarea>
+                </div>
+            </div>
+
+            <button class="btn-save" onclick="saveEmailTemplates()">Templates opslaan</button>
+            <span id="tpl-message" style="margin-left:12px;font-size:0.85rem"></span>
+        </div>
     </div>
 
     <script>
@@ -229,6 +263,7 @@
 
         document.addEventListener('DOMContentLoaded', () => {
             loadShelves().then(() => loadUsers());
+            loadEmailTemplates();
         });
 
         async function loadShelves() {
@@ -376,6 +411,45 @@
             } catch (error) {
                 alert('Netwerkfout: ' + error.message);
             }
+        }
+
+        async function loadEmailTemplates() {
+            try {
+                const resp = await fetch('/api/admin/email-templates');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                document.getElementById('tpl-found-subject').value = data.found_subject;
+                document.getElementById('tpl-found-body').value = data.found_body;
+                document.getElementById('tpl-shelved-subject').value = data.shelved_subject;
+                document.getElementById('tpl-shelved-body').value = data.shelved_body;
+            } catch (e) {}
+        }
+
+        async function saveEmailTemplates() {
+            const msg = document.getElementById('tpl-message');
+            try {
+                const resp = await fetch('/api/admin/email-templates', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        found_subject: document.getElementById('tpl-found-subject').value,
+                        found_body: document.getElementById('tpl-found-body').value,
+                        shelved_subject: document.getElementById('tpl-shelved-subject').value,
+                        shelved_body: document.getElementById('tpl-shelved-body').value,
+                    }),
+                });
+                if (resp.ok) {
+                    msg.textContent = '✓ Opgeslagen';
+                    msg.style.color = 'var(--primary)';
+                } else {
+                    msg.textContent = 'Opslaan mislukt';
+                    msg.style.color = 'var(--danger)';
+                }
+            } catch (e) {
+                msg.textContent = 'Netwerkfout';
+                msg.style.color = 'var(--danger)';
+            }
+            setTimeout(() => msg.textContent = '', 3000);
         }
 
         function copyAutolink(userId) {
