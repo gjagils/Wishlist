@@ -64,36 +64,53 @@ def requires_admin(f):
 
 @app.route('/autologin', methods=['GET'])
 def autologin():
-    """Auto-login via HMAC-signed URL. Voor links vanuit Calibre-Web."""
+    """
+    Auto-login via gedeeld geheim of HMAC-signed URL.
+
+    Twee modes:
+    1. Shared key: /autologin?user=naam&key=<AUTOLOGIN_KEY>
+       → Voor Calibre-Web template: {{ current_user.name }} als user
+    2. HMAC token: /autologin?user=naam&token=<hmac>&ts=<timestamp>
+       → Voor admin-gegenereerde links (30 dagen geldig)
+    """
     import hmac
     import hashlib
 
     username = request.args.get('user', '')
+    if not username:
+        return redirect(url_for('login'))
+
+    authenticated = False
+
+    # Mode 1: Shared key (voor Calibre-Web template links)
+    key = request.args.get('key', '')
+    autologin_key = os.environ.get('AUTOLOGIN_KEY', app.config['SECRET_KEY'])
+    if key and hmac.compare_digest(key, autologin_key):
+        authenticated = True
+
+    # Mode 2: HMAC token (voor admin-gegenereerde links)
     token = request.args.get('token', '')
     ts = request.args.get('ts', '')
+    if not authenticated and token:
+        secret = app.config['SECRET_KEY']
+        expected = hmac.new(
+            secret.encode(), f"{username}:{ts}".encode(), hashlib.sha256
+        ).hexdigest()[:32]
 
-    if not username or not token:
+        if hmac.compare_digest(token, expected):
+            # Check timestamp (max 30 dagen)
+            if ts:
+                try:
+                    from datetime import datetime
+                    age = (datetime.now() - datetime.fromisoformat(ts)).days
+                    authenticated = age <= 30
+                except Exception:
+                    authenticated = True
+            else:
+                authenticated = True
+
+    if not authenticated:
         return redirect(url_for('login'))
-
-    # Valideer HMAC token
-    secret = app.config['SECRET_KEY']
-    expected = hmac.new(
-        secret.encode(), f"{username}:{ts}".encode(), hashlib.sha256
-    ).hexdigest()[:32]
-
-    if not hmac.compare_digest(token, expected):
-        return redirect(url_for('login'))
-
-    # Optioneel: check timestamp (token max 30 dagen geldig)
-    if ts:
-        try:
-            from datetime import datetime
-            token_time = datetime.fromisoformat(ts)
-            age = (datetime.now() - token_time).days
-            if age > 30:
-                return redirect(url_for('login'))
-        except Exception:
-            pass
 
     # Auto-registratie
     user = db.get_user(username)

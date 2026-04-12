@@ -39,6 +39,9 @@ services:
       - EMAIL_CHECK_INTERVAL=${EMAIL_CHECK_INTERVAL:-300}
       - EMAIL_ALLOWED_SENDERS=${EMAIL_ALLOWED_SENDERS:-}
 
+      # === Auto-login (voor Calibre-Web link) ===
+      - AUTOLOGIN_KEY=${AUTOLOGIN_KEY:-}
+
       # === Calibre-Web ===
       - CALIBREWEB_URL=${CALIBREWEB_URL:-}
       - CALIBREWEB_USERNAME=${CALIBREWEB_USERNAME:-}
