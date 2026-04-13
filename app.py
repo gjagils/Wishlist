@@ -2,6 +2,7 @@
 """
 Flask web applicatie voor Wishlist beheer.
 Biedt web UI en REST API met sessie-authenticatie via Calibre-Web.
+Multi-user v1.0
 """
 import json
 import os
