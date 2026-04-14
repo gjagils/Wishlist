@@ -620,6 +620,7 @@ def api_retry_search(item_id: int):
 # Lock om te voorkomen dat meerdere zoekacties tegelijk draaien
 _search_lock = threading.Lock()
 _search_running = False
+_calibre_check_running = False
 
 
 def _run_search_now():
@@ -635,6 +636,20 @@ def _run_search_now():
         db.add_log(None, 'error', f'Handmatige zoekactie fout: {e}')
     finally:
         _search_running = False
+
+
+def _run_calibre_check_now():
+    """Draai Calibre-Web existence check voor pending items in achtergrondthread."""
+    global _calibre_check_running
+    try:
+        from worker import check_existing_in_calibre
+        db.add_log(None, 'info', 'Handmatige Calibre-Web check gestart')
+        check_existing_in_calibre()
+        db.add_log(None, 'info', 'Handmatige Calibre-Web check voltooid')
+    except Exception as e:
+        db.add_log(None, 'error', f'Handmatige Calibre-Web check fout: {e}')
+    finally:
+        _calibre_check_running = False
 
 
 @app.route('/api/search/start', methods=['POST'])
@@ -656,6 +671,28 @@ def api_start_search():
 
     return jsonify({
         'message': f'Zoekactie gestart voor {len(pending)} item(s)'
+    }), 202
+
+
+@app.route('/api/calibre/check', methods=['POST'])
+@requires_auth
+def api_calibre_check():
+    """Start handmatig een Calibre-Web existence check voor pending items."""
+    global _calibre_check_running
+
+    if _calibre_check_running:
+        return jsonify({'error': 'Er draait al een Calibre-Web check'}), 409
+
+    pending = db.get_wishlist_items(status='pending')
+    if not pending:
+        return jsonify({'error': 'Geen pending items om te checken'}), 404
+
+    _calibre_check_running = True
+    thread = threading.Thread(target=_run_calibre_check_now, daemon=True)
+    thread.start()
+
+    return jsonify({
+        'message': f'Calibre-Web check gestart voor {len(pending)} item(s)'
     }), 202
 
 

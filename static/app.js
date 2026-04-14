@@ -258,6 +258,35 @@ async function startSearchNow() {
     }
 }
 
+async function checkCalibreNow() {
+    const btn = document.getElementById('btn-calibre-check');
+    btn.disabled = true;
+    const origText = btn.innerHTML;
+    btn.innerHTML = '<svg viewBox="0 0 20 20" width="16" height="16"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="20" stroke-dashoffset="0"><animateTransform attributeName="transform" type="rotate" dur="0.8s" from="0 10 10" to="360 10 10" repeatCount="indefinite"/></circle></svg> Bezig...';
+
+    try {
+        const response = await fetch('/api/calibre/check', {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            loadWishlist();
+            loadLogs();
+        } else {
+            const data = await response.json();
+            alert(data.error || 'Calibre-Web check starten mislukt');
+        }
+    } catch (error) {
+        alert('Netwerkfout: ' + error.message);
+    } finally {
+        setTimeout(() => {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }, 3000);
+    }
+}
+
 async function retrySearch(itemId) {
     try {
         const response = await fetch(`/api/wishlist/${itemId}/retry`, {
