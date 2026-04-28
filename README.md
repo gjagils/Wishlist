@@ -1,4 +1,5 @@
 # 📚 Wishlist Manager
+<!-- last smoke deploy: 2026-04-28 -->
 
 Een webgebaseerde wishlist manager die automatisch boeken/ebooks zoekt in Spotweb en toevoegt aan SABnzbd.
 
