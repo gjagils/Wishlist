@@ -576,8 +576,10 @@ body {
 .status-pending { background: var(--tertiary); color: var(--white); }
 .status-searching { background: var(--secondary); color: var(--white); }
 .status-found { background: var(--primary); color: var(--white); }
-.status-importing { background: var(--secondary); color: var(--white); }
+.status-imported { background: var(--secondary); color: var(--white); }
+.status-done { background: var(--success); color: var(--white); }
 .status-shelved { background: #7B61A0; color: var(--white); }
+.status-shelf_failed { background: var(--warning); color: var(--white); }
 .status-failed { background: var(--danger); color: var(--white); }
 .status-stuck { background: var(--warning); color: var(--white); }
 

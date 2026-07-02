@@ -224,21 +224,12 @@ def process_item(item: dict) -> None:
         success = sab_addurl(nzb_url, nzbname)
 
         if success:
-            shelf_name = item.get('shelf_name')
-
-            if shelf_name and calibreweb.is_configured():
-                db.update_wishlist_status(
-                    item_id,
-                    "importing",
-                    nzb_url=nzb_url
-                )
-                db.add_log(item_id, "info", f"✓ SABnzbd OK, wachten op Calibre import → {shelf_name}")
+            if calibreweb.is_configured():
+                db.update_wishlist_status(item_id, "found", nzb_url=nzb_url)
+                db.add_log(item_id, "info", "✓ Toegevoegd aan SABnzbd, wachten op Calibre-Web import")
             else:
-                db.update_wishlist_status(
-                    item_id,
-                    "found",
-                    nzb_url=nzb_url
-                )
+                # Geen Calibre-Web integratie: niets om op te wachten of te bevestigen
+                db.update_wishlist_status(item_id, "done", nzb_url=nzb_url)
                 db.add_log(item_id, "info", "✓ Toegevoegd aan SABnzbd")
 
             # E-mail notificatie
@@ -264,43 +255,77 @@ def process_item(item: dict) -> None:
         db.add_log(item_id, "error", f"Fout: {e}")
 
 
-def check_importing_items() -> None:
+def finalize_import(item: dict, book_id: int) -> None:
     """
-    Check items met status 'importing': zoek in Calibre-Web en
-    zet op boekenplank als het boek gevonden wordt.
+    Verwerk een bevestigde match in Calibre-Web ('imported').
+
+    Zonder boekenplank is het item meteen 'done'. Met boekenplank wordt
+    geprobeerd te shelven: gelukt → 'shelved', mislukt → 'shelf_failed'
+    (blijft zichtbaar als foutstatus, net als 'failed' en 'stuck').
+    """
+    item_id = item['id']
+    shelf_name = item.get('shelf_name')
+    nzb_url = item.get('nzb_url')
+
+    db.update_wishlist_status(item_id, "imported", nzb_url=nzb_url)
+    db.add_log(item_id, "info", f"✓ Geïmporteerd in Calibre-Web (book_id={book_id})")
+
+    if not shelf_name:
+        db.update_wishlist_status(item_id, "done", nzb_url=nzb_url)
+        return
+
+    success = calibreweb.add_book_to_shelf(shelf_name, book_id)
+
+    if success:
+        db.update_wishlist_status(item_id, "shelved", nzb_url=nzb_url)
+        db.add_log(item_id, "info", f"✓ Op boekenplank gezet: {shelf_name} (book_id={book_id})")
+
+        try:
+            email_sender.notify_item_shelved(item)
+        except Exception as e:
+            db.add_log(item_id, "warning", f"E-mail notificatie mislukt: {e}")
+    else:
+        db.update_wishlist_status(
+            item_id,
+            "shelf_failed",
+            nzb_url=nzb_url,
+            error_message=f"Plank '{shelf_name}' toevoegen mislukt"
+        )
+        db.add_log(item_id, "warning",
+                   f"Boek geïmporteerd (book_id={book_id}) maar plank toevoegen mislukt: {shelf_name}")
+
+
+def check_found_items() -> None:
+    """
+    Check items met status 'found': zoek in Calibre-Web en rond af als
+    het boek gevonden wordt (zie finalize_import).
 
     Items die langer dan IMPORT_TIMEOUT_HOURS niet gematcht kunnen worden
     (bv. omdat de import in Calibre-Web nooit gebeurt of titel/auteur niet
     matchen) worden op 'stuck' gezet zodat ze niet stil voor altijd blijven
-    hangen op 'importing'.
+    hangen op 'found'.
     """
     if not calibreweb.is_configured():
         return
 
-    importing = db.get_wishlist_items(status='importing')
-    if not importing:
+    found_items = db.get_wishlist_items(status='found')
+    if not found_items:
         return
 
-    for item in importing:
+    for item in found_items:
         item_id = item['id']
         author = item['author']
         title = item['title']
-        shelf_name = item.get('shelf_name')
-
-        if not shelf_name:
-            db.update_wishlist_status(item_id, "found")
-            db.add_log(item_id, "info", "Geen boekenplank, status → gevonden")
-            continue
 
         try:
             book_id = calibreweb.search_book(author, title)
 
             if not book_id:
-                importing_since = item.get('last_search')
+                found_since = item.get('last_search')
                 elapsed_hours = None
-                if importing_since:
+                if found_since:
                     try:
-                        elapsed_hours = (datetime.now() - datetime.fromisoformat(importing_since)).total_seconds() / 3600
+                        elapsed_hours = (datetime.now() - datetime.fromisoformat(found_since)).total_seconds() / 3600
                     except ValueError:
                         elapsed_hours = None
 
@@ -318,18 +343,7 @@ def check_importing_items() -> None:
 
                 continue
 
-            success = calibreweb.add_book_to_shelf(shelf_name, book_id)
-
-            if success:
-                db.update_wishlist_status(item_id, "shelved")
-                db.add_log(item_id, "info", f"✓ Op boekenplank gezet: {shelf_name} (book_id={book_id})")
-
-                try:
-                    email_sender.notify_item_shelved(item)
-                except Exception as e:
-                    db.add_log(item_id, "warning", f"E-mail notificatie mislukt: {e}")
-            else:
-                db.add_log(item_id, "warning", f"Boek gevonden (book_id={book_id}) maar plank toevoegen mislukt")
+            finalize_import(item, book_id)
 
         except Exception as e:
             db.add_log(item_id, "error", f"Calibre-Web fout: {e}")
@@ -344,7 +358,7 @@ def check_existing_in_calibre() -> None:
     """
     Check of pending items al in Calibre-Web bestaan.
     Voorkomt dubbele downloads — als een boek al in de bibliotheek staat,
-    wordt het direct op de plank gezet of als 'found' gemarkeerd.
+    wordt het direct afgerond via finalize_import.
     """
     if not calibreweb.is_configured():
         return
@@ -357,29 +371,14 @@ def check_existing_in_calibre() -> None:
         item_id = item['id']
         author = item['author']
         title = item['title']
-        shelf_name = item.get('shelf_name')
 
         try:
             book_id = calibreweb.search_book(author, title)
             if not book_id:
                 continue
 
-            # Boek bestaat al in Calibre-Web!
-            if shelf_name:
-                success = calibreweb.add_book_to_shelf(shelf_name, book_id)
-                if success:
-                    db.update_wishlist_status(item_id, "shelved")
-                    db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre → op plank gezet: {shelf_name} (book_id={book_id})")
-                    try:
-                        email_sender.notify_item_shelved(item)
-                    except Exception:
-                        pass
-                else:
-                    db.update_wishlist_status(item_id, "found")
-                    db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre (book_id={book_id}) maar plank toevoegen mislukt")
-            else:
-                db.update_wishlist_status(item_id, "found")
-                db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre (book_id={book_id})")
+            db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre-Web (book_id={book_id})")
+            finalize_import(item, book_id)
 
         except Exception as e:
             db.add_log(item_id, "error", f"Calibre-Web check fout: {e}")
@@ -413,7 +412,7 @@ def worker_loop() -> None:
 
                 last_search_time = time.time()
 
-            check_importing_items()
+            check_found_items()
 
         except Exception as e:
             db.add_log(None, "error", f"Worker fout: {e}")

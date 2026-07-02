@@ -134,6 +134,10 @@ def init_db() -> None:
             )
             print(f"Admin user aangemaakt: {admin_username}")
 
+        # Migratie: oude 'importing' status hernoemd naar 'found'
+        # (found is nu altijd de wachtstatus, ongeacht boekenplank)
+        conn.execute("UPDATE wishlist SET status = 'found' WHERE status = 'importing'")
+
     # Set permissions op database file en WAL files
     try:
         if os.path.exists(DB_PATH):

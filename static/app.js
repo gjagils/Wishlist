@@ -305,7 +305,7 @@ async function retrySearch(itemId) {
 
 async function deleteAllFound() {
     const doneItems = wishlistData.items.filter(item =>
-        item.status === 'found' || item.status === 'shelved'
+        item.status === 'done' || item.status === 'shelved'
     );
 
     if (doneItems.length === 0) {
@@ -317,7 +317,7 @@ async function deleteAllFound() {
 
     try {
         let totalDeleted = 0;
-        for (const status of ['found', 'shelved']) {
+        for (const status of ['done', 'shelved']) {
             const response = await fetch('/api/wishlist/bulk-delete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -372,7 +372,8 @@ function updateStats(stats) {
     document.getElementById('stat-total').textContent = stats.total || 0;
     document.getElementById('stat-pending').textContent = stats.pending || 0;
     document.getElementById('stat-searching').textContent = stats.searching || 0;
-    document.getElementById('stat-found').textContent = (stats.found || 0) + (stats.importing || 0) + (stats.shelved || 0);
+    document.getElementById('stat-found').textContent =
+        (stats.found || 0) + (stats.imported || 0) + (stats.done || 0) + (stats.shelved || 0);
 }
 
 function getStatusText(status) {
@@ -380,8 +381,10 @@ function getStatusText(status) {
         'pending': 'Pending',
         'searching': 'Searching',
         'found': 'Found',
-        'importing': 'Importing',
+        'imported': 'Imported',
+        'done': 'Done',
         'shelved': 'Shelved',
+        'shelf_failed': 'Shelf failed',
         'failed': 'Failed',
         'stuck': 'Stuck'
     }[status] || status;
@@ -421,7 +424,7 @@ function renderWishlist() {
         return;
     }
 
-    const doneStatuses = ['found', 'shelved'];
+    const doneStatuses = ['done', 'shelved'];
     const activeItems = items.filter(item => !doneStatuses.includes(item.status));
     const doneItems = items.filter(item => doneStatuses.includes(item.status));
 

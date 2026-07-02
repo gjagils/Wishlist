@@ -273,8 +273,10 @@ def api_get_wishlist():
         'pending': len([i for i in all_items if i['status'] == 'pending']),
         'searching': len([i for i in all_items if i['status'] == 'searching']),
         'found': len([i for i in all_items if i['status'] == 'found']),
-        'importing': len([i for i in all_items if i['status'] == 'importing']),
+        'imported': len([i for i in all_items if i['status'] == 'imported']),
+        'done': len([i for i in all_items if i['status'] == 'done']),
         'shelved': len([i for i in all_items if i['status'] == 'shelved']),
+        'shelf_failed': len([i for i in all_items if i['status'] == 'shelf_failed']),
         'failed': len([i for i in all_items if i['status'] == 'failed']),
         'stuck': len([i for i in all_items if i['status'] == 'stuck']),
     }
@@ -357,35 +359,24 @@ def api_add_wishlist():
         def _search_new_item():
             import time
             try:
-                from worker import process_item
+                from worker import process_item, finalize_import
                 fresh = db.get_wishlist_item(item_id)
                 if not fresh or fresh['status'] != 'pending':
                     return
                 process_item(fresh)
 
-                # Als importing: poll Calibre-Web tot eindstatus
+                # Als found: poll Calibre-Web tot eindstatus
                 fresh = db.get_wishlist_item(item_id)
-                if not fresh or fresh['status'] != 'importing':
+                if not fresh or fresh['status'] != 'found':
                     return
-                sn = fresh.get('shelf_name')
-                if not sn or not calibreweb.is_configured():
+                if not calibreweb.is_configured():
                     return
                 for _ in range(40):
                     time.sleep(15)
                     try:
                         book_id = calibreweb.search_book(fresh['author'], fresh['title'])
                         if book_id:
-                            ok = calibreweb.add_book_to_shelf(sn, book_id)
-                            if ok:
-                                db.update_wishlist_status(item_id, 'shelved')
-                                db.add_log(item_id, 'info', f'✓ Op plank: {sn} (book_id={book_id})')
-                                try:
-                                    import email_sender
-                                    email_sender.notify_item_shelved(fresh)
-                                except Exception:
-                                    pass
-                            else:
-                                db.update_wishlist_status(item_id, 'found')
+                            finalize_import(fresh, book_id)
                             return
                     except Exception:
                         pass
@@ -531,7 +522,7 @@ def api_bulk_delete_wishlist():
 
     status = data['status']
 
-    valid_statuses = ['pending', 'searching', 'found', 'importing', 'shelved', 'failed', 'stuck']
+    valid_statuses = ['pending', 'searching', 'found', 'imported', 'done', 'shelved', 'shelf_failed', 'failed', 'stuck']
     if status not in valid_statuses:
         return jsonify({'error': f'Ongeldige status. Gebruik: {", ".join(valid_statuses)}'}), 400
 
@@ -564,7 +555,7 @@ def api_retry_search(item_id: int):
     def _search_and_follow():
         import time
         try:
-            from worker import process_item
+            from worker import process_item, finalize_import
             fresh_item = db.get_wishlist_item(item_id)
             if not fresh_item or fresh_item['status'] != 'pending':
                 return
@@ -572,13 +563,12 @@ def api_retry_search(item_id: int):
             # Stap 1: zoek in Spotweb en stuur naar SABnzbd
             process_item(fresh_item)
 
-            # Stap 2: als status nu 'importing', poll Calibre-Web tot eindstatus
+            # Stap 2: als status nu 'found', poll Calibre-Web tot eindstatus
             item = db.get_wishlist_item(item_id)
-            if not item or item['status'] != 'importing':
+            if not item or item['status'] != 'found':
                 return  # Niet gevonden of al klaar
 
-            shelf_name = item.get('shelf_name')
-            if not shelf_name or not calibreweb.is_configured():
+            if not calibreweb.is_configured():
                 return
 
             db.add_log(item_id, 'info', 'Wachten op Calibre-Web import...')
@@ -589,20 +579,7 @@ def api_retry_search(item_id: int):
                 try:
                     book_id = calibreweb.search_book(item['author'], item['title'])
                     if book_id:
-                        success = calibreweb.add_book_to_shelf(shelf_name, book_id)
-                        if success:
-                            db.update_wishlist_status(item_id, 'shelved')
-                            db.add_log(item_id, 'info',
-                                       f'✓ Op boekenplank gezet: {shelf_name} (book_id={book_id})')
-                            try:
-                                import email_sender
-                                email_sender.notify_item_shelved(item)
-                            except Exception:
-                                pass
-                        else:
-                            db.update_wishlist_status(item_id, 'found')
-                            db.add_log(item_id, 'info',
-                                       f'Boek gevonden (book_id={book_id}) maar plank mislukt')
+                        finalize_import(item, book_id)
                         return  # Eindstatus bereikt
                 except Exception:
                     pass
@@ -905,8 +882,10 @@ def api_get_stats():
         'pending': len([i for i in items if i['status'] == 'pending']),
         'searching': len([i for i in items if i['status'] == 'searching']),
         'found': len([i for i in items if i['status'] == 'found']),
-        'importing': len([i for i in items if i['status'] == 'importing']),
+        'imported': len([i for i in items if i['status'] == 'imported']),
+        'done': len([i for i in items if i['status'] == 'done']),
         'shelved': len([i for i in items if i['status'] == 'shelved']),
+        'shelf_failed': len([i for i in items if i['status'] == 'shelf_failed']),
         'failed': len([i for i in items if i['status'] == 'failed']),
         'stuck': len([i for i in items if i['status'] == 'stuck']),
         'recent_logs': logs

@@ -7,6 +7,7 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formataddr
 from typing import List, Optional
 
 import database as db
@@ -17,6 +18,7 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME", "") or os.environ.get("EMAIL_ADDRESS", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "") or os.environ.get("EMAIL_PASSWORD", "")
 SMTP_FROM = os.environ.get("SMTP_FROM", "") or os.environ.get("EMAIL_ADDRESS", "")
+SMTP_FROM_NAME = os.environ.get("SMTP_FROM_NAME", "")
 SMTP_USE_TLS = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 
@@ -31,7 +33,7 @@ def send_notification(to_emails: List[str], subject: str, body: str) -> bool:
         return False
 
     msg = MIMEMultipart("alternative")
-    msg["From"] = SMTP_FROM
+    msg["From"] = formataddr((SMTP_FROM_NAME, SMTP_FROM)) if SMTP_FROM_NAME else SMTP_FROM
     msg["To"] = ", ".join(to_emails)
     msg["Subject"] = subject
 
