@@ -7,6 +7,7 @@ import os
 import time
 import re
 import requests
+from datetime import datetime
 from urllib.parse import urlencode
 from lxml import etree
 from typing import List, Optional, Set
@@ -23,6 +24,7 @@ SAB_APIKEY = os.environ["SAB_APIKEY"]
 
 INTERVAL_SECONDS = int(os.environ.get("INTERVAL_SECONDS", "900"))  # 15 min
 IMPORT_CHECK_SECONDS = int(os.environ.get("IMPORT_CHECK_SECONDS", "120"))  # 2 min
+IMPORT_TIMEOUT_HOURS = float(os.environ.get("IMPORT_TIMEOUT_HOURS", "6"))
 SPOTWEB_CAT = os.environ.get("SPOTWEB_CAT", "7020")  # Ebook
 SAB_CATEGORY = os.environ.get("SAB_CATEGORY", "books")
 
@@ -266,6 +268,11 @@ def check_importing_items() -> None:
     """
     Check items met status 'importing': zoek in Calibre-Web en
     zet op boekenplank als het boek gevonden wordt.
+
+    Items die langer dan IMPORT_TIMEOUT_HOURS niet gematcht kunnen worden
+    (bv. omdat de import in Calibre-Web nooit gebeurt of titel/auteur niet
+    matchen) worden op 'stuck' gezet zodat ze niet stil voor altijd blijven
+    hangen op 'importing'.
     """
     if not calibreweb.is_configured():
         return
@@ -289,6 +296,26 @@ def check_importing_items() -> None:
             book_id = calibreweb.search_book(author, title)
 
             if not book_id:
+                importing_since = item.get('last_search')
+                elapsed_hours = None
+                if importing_since:
+                    try:
+                        elapsed_hours = (datetime.now() - datetime.fromisoformat(importing_since)).total_seconds() / 3600
+                    except ValueError:
+                        elapsed_hours = None
+
+                if elapsed_hours is not None and elapsed_hours >= IMPORT_TIMEOUT_HOURS:
+                    db.update_wishlist_status(
+                        item_id,
+                        "stuck",
+                        nzb_url=item.get('nzb_url'),
+                        error_message=f"Niet gevonden in Calibre-Web na {IMPORT_TIMEOUT_HOURS:.0f} uur wachten"
+                    )
+                    db.add_log(item_id, "warning",
+                               f"Vastgelopen: boek na {elapsed_hours:.1f} uur nog niet gematcht in Calibre-Web "
+                               f"(auteur='{author}', titel='{title}') — controleer of het boek is geïmporteerd "
+                               f"en of titel/auteur overeenkomen")
+
                 continue
 
             success = calibreweb.add_book_to_shelf(shelf_name, book_id)

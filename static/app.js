@@ -382,7 +382,8 @@ function getStatusText(status) {
         'found': 'Found',
         'importing': 'Importing',
         'shelved': 'Shelved',
-        'failed': 'Failed'
+        'failed': 'Failed',
+        'stuck': 'Stuck'
     }[status] || status;
 }
 

@@ -276,6 +276,7 @@ def api_get_wishlist():
         'importing': len([i for i in all_items if i['status'] == 'importing']),
         'shelved': len([i for i in all_items if i['status'] == 'shelved']),
         'failed': len([i for i in all_items if i['status'] == 'failed']),
+        'stuck': len([i for i in all_items if i['status'] == 'stuck']),
     }
 
     return jsonify({
@@ -530,7 +531,7 @@ def api_bulk_delete_wishlist():
 
     status = data['status']
 
-    valid_statuses = ['pending', 'searching', 'found', 'importing', 'shelved', 'failed']
+    valid_statuses = ['pending', 'searching', 'found', 'importing', 'shelved', 'failed', 'stuck']
     if status not in valid_statuses:
         return jsonify({'error': f'Ongeldige status. Gebruik: {", ".join(valid_statuses)}'}), 400
 
@@ -907,6 +908,7 @@ def api_get_stats():
         'importing': len([i for i in items if i['status'] == 'importing']),
         'shelved': len([i for i in items if i['status'] == 'shelved']),
         'failed': len([i for i in items if i['status'] == 'failed']),
+        'stuck': len([i for i in items if i['status'] == 'stuck']),
         'recent_logs': logs
     }
 
