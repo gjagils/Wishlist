@@ -242,8 +242,11 @@ def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
     edities vaak beter dekt). Beide volgordes worden gecheckt.
 
     Vinden die niets (bv. omdat elk woord een typefout bevat), dan mag
-    Claude Haiku een normalisatie voorstellen \u2014 die alleen wordt overgenomen
-    als Google Books/Open Library de suggestie daarna w\u00E9l kan bevestigen.
+    Claude Haiku een normalisatie voorstellen. Die wordt alleen overgenomen
+    als (a) Google Books/Open Library het als echt boek bevestigt \u00E9n (b) het
+    bevestigde boek nog voldoende lijkt op de oorspronkelijke invoer \u2014 anders
+    zou een gehallucineerd maar bestaand boek (bv. "samel bork - dodsvogel"
+    \u2192 Beckett/Molloy) er onterecht doorheen glippen.
 
     Als niets een overtuigende match oplevert, wordt aangenomen dat het
     eerste deel de auteur is (de gebruikelijke volgorde) \u2014 de tekst zoals
@@ -258,12 +261,12 @@ def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
     if llm:
         for lookup in (_google_books_lookup, _openlibrary_lookup):
             match = lookup(llm["author"], llm["title"])
-            if match:
+            if match and _candidate_matches_guess(match["title"], match["author"], part_a, part_b):
                 print(f"   \u2713 AI-normalisatie geverifieerd: '{part_a} - {part_b}' "
                       f"\u2192 {match['author']} - \"{match['title']}\"")
                 return match["author"], match["title"]
-        print(f"   \u26A0\uFE0F AI-suggestie ({llm['author']} - \"{llm['title']}\") niet te verifi\u00EBren "
-              f"via Google Books/Open Library \u2014 genegeerd")
+        print(f"   \u26A0\uFE0F AI-suggestie ({llm['author']} - \"{llm['title']}\") lijkt niet op de "
+              f"aanvraag of niet te verifi\u00EBren \u2014 genegeerd")
 
     print(f"   \u26A0\uFE0F Kon '{part_a}' / '{part_b}' niet bevestigen via Google Books/Open Library, "
           f"aanname: '{part_a}' = auteur, '{part_b}' = titel")
