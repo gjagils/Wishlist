@@ -310,6 +310,69 @@ def _normalize(text: str) -> str:
     return "".join(c for c in text if unicodedata.category(c) != "Mn")
 
 
+def _parse_opds_entry(entry, ns: dict) -> tuple:
+    """Haal (book_id, titel, auteur) uit een OPDS atom:entry. book_id is None als niet te vinden."""
+    entry_title_el = entry.find("atom:title", ns)
+    entry_title = entry_title_el.text if entry_title_el is not None else ""
+    entry_author_el = entry.find("atom:author/atom:name", ns)
+    entry_author = entry_author_el.text if entry_author_el is not None else ""
+
+    book_id = None
+    for link in entry.findall("atom:link", ns):
+        href = link.get("href", "")
+        book_match = re.search(r'/opds/(?:cover|download)/(\d+)', href)
+        if not book_match:
+            book_match = re.search(r'/book/(\d+)', href)
+        if book_match:
+            book_id = int(book_match.group(1))
+            break
+
+    return book_id, entry_title or "", entry_author or ""
+
+
+def get_recent_books(limit: int = 10) -> List[Dict]:
+    """
+    Haal de meest recent toegevoegde boeken op uit Calibre-Web (OPDS 'new' feed,
+    gesorteerd op toevoegdatum). Bedoeld als fallback wanneer search_book() geen
+    match vindt terwijl het boek wel net geïmporteerd is (bv. onder afwijkende
+    metadata).
+    """
+    if not is_configured():
+        return []
+
+    from lxml import etree
+
+    try:
+        resp = requests.get(
+            f"{CALIBREWEB_URL}/opds/new",
+            auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.RequestException:
+        return []
+
+    content_type = resp.headers.get("content-type", "")
+    if "html" in content_type:
+        return []
+
+    try:
+        root = etree.fromstring(resp.content)
+    except Exception:
+        return []
+
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    entries = root.findall("atom:entry", ns) or root.findall("entry")
+
+    books = []
+    for entry in entries[:limit]:
+        book_id, entry_title, entry_author = _parse_opds_entry(entry, ns)
+        if book_id is not None:
+            books.append({"book_id": book_id, "title": entry_title, "author": entry_author})
+
+    return books
+
+
 def search_book(author: str, title: str) -> Optional[int]:
     """
     Zoek een boek in Calibre-Web via de OPDS feed.
@@ -346,21 +409,7 @@ def search_book(author: str, title: str) -> Optional[int]:
     ns = {"atom": "http://www.w3.org/2005/Atom"}
 
     for entry in entries:
-        entry_title_el = entry.find("atom:title", ns)
-        entry_title = entry_title_el.text if entry_title_el is not None else ""
-        entry_author_el = entry.find("atom:author/atom:name", ns)
-        entry_author = entry_author_el.text if entry_author_el is not None else ""
-
-        # Zoek book ID uit links (cover of download URL)
-        book_id = None
-        for link in entry.findall("atom:link", ns):
-            href = link.get("href", "")
-            book_match = re.search(r'/opds/(?:cover|download)/(\d+)', href)
-            if not book_match:
-                book_match = re.search(r'/book/(\d+)', href)
-            if book_match:
-                book_id = int(book_match.group(1))
-                break
+        book_id, entry_title, entry_author = _parse_opds_entry(entry, ns)
 
         if book_id is None:
             continue
@@ -439,3 +488,48 @@ def add_book_to_shelf(shelf_name: str, book_id: int) -> bool:
         print(f"      ✗ Plank toevoegen mislukt: {e}")
         _invalidate_session()
         return False
+
+
+def _edit_book_field(book_id: int, field: str, value: str) -> bool:
+    """
+    Zet één metadata-veld op een boek via Calibre-Web's inline-edit ajax endpoint
+    (/ajax/editbooks/<field>). Raakt alleen dit veld aan, niet de rest van de metadata.
+    """
+    session = _get_session()
+
+    csrf_token = _get_csrf_token(session, f"{CALIBREWEB_URL}/admin/book/{book_id}")
+    if not csrf_token:
+        csrf_token = _get_csrf_token(session, f"{CALIBREWEB_URL}/")
+
+    try:
+        headers = {"X-CSRFToken": csrf_token or ""}
+        resp = session.post(
+            f"{CALIBREWEB_URL}/ajax/editbooks/{field}",
+            json={"pk": [book_id], "value": value},
+            headers=headers,
+            timeout=10,
+        )
+
+        if resp.status_code != 200:
+            print(f"      ✗ Metadata ({field}) bijwerken mislukt: status={resp.status_code}")
+            return False
+
+        data = resp.json()
+        if not data.get("success"):
+            print(f"      ✗ Metadata ({field}) bijwerken mislukt: {data.get('msg')}")
+        return bool(data.get("success"))
+
+    except (requests.RequestException, ValueError) as e:
+        print(f"      ✗ Metadata ({field}) bijwerken mislukt: {e}")
+        _invalidate_session()
+        return False
+
+
+def update_book_title(book_id: int, title: str) -> bool:
+    """Corrigeer de titel van een boek in Calibre-Web."""
+    return _edit_book_field(book_id, "title", title)
+
+
+def update_book_author(book_id: int, author: str) -> bool:
+    """Corrigeer de auteur van een boek in Calibre-Web."""
+    return _edit_book_field(book_id, "authors", author)

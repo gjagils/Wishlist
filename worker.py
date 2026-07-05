@@ -295,6 +295,48 @@ def finalize_import(item: dict, book_id: int) -> None:
                    f"Boek geïmporteerd (book_id={book_id}) maar plank toevoegen mislukt: {shelf_name}")
 
 
+def match_recent_import(item: dict) -> Optional[int]:
+    """
+    Fallback voor als search_book() geen match vindt: kijk of het boek
+    tussen de meest recent toegevoegde boeken in Calibre-Web zit met een
+    titel/auteur die lijkt op (maar niet noodzakelijk exact overeenkomt met)
+    dit item — bv. omdat Calibre-Web de metadata net iets anders heeft
+    geparsed bij de import.
+
+    Corrigeert bij een match ook meteen de titel/auteur in Calibre-Web naar
+    de canonieke waarden uit de wishlist.
+
+    Returns: book_id als er een aannemelijke recente match is, anders None
+    """
+    item_id = item['id']
+    author = item['author']
+    title = item['title']
+
+    recent_books = calibreweb.get_recent_books(limit=10)
+
+    for book in recent_books:
+        candidate = f"{book['title']} {book['author']}"
+        if not candidate_matches(author, title, candidate):
+            continue
+
+        book_id = book['book_id']
+
+        if book['title'].strip().lower() != title.strip().lower():
+            if not calibreweb.update_book_title(book_id, title):
+                db.add_log(item_id, "warning",
+                           f"Metadata-titel bijwerken mislukt (book_id={book_id}), "
+                           f"controleer Edit-rechten van de Calibre-Web integratie-account")
+        if book['author'].strip().lower() != author.strip().lower():
+            if not calibreweb.update_book_author(book_id, author):
+                db.add_log(item_id, "warning",
+                           f"Metadata-auteur bijwerken mislukt (book_id={book_id}), "
+                           f"controleer Edit-rechten van de Calibre-Web integratie-account")
+
+        return book_id
+
+    return None
+
+
 def check_found_items() -> None:
     """
     Check items met status 'found': zoek in Calibre-Web en rond af als
@@ -319,6 +361,13 @@ def check_found_items() -> None:
 
         try:
             book_id = calibreweb.search_book(author, title)
+
+            if not book_id:
+                book_id = match_recent_import(item)
+                if book_id:
+                    db.add_log(item_id, "info",
+                               f"✓ Match gevonden via 'recent toegevoegd' (book_id={book_id}), "
+                               f"metadata gecontroleerd/gecorrigeerd")
 
             if not book_id:
                 found_since = item.get('last_search')
