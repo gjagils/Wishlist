@@ -116,24 +116,62 @@ def _google_books_lookup(guess_title: str, guess_author: str) -> Optional[Dict[s
     return None
 
 
+def _openlibrary_lookup(guess_title: str, guess_author: str) -> Optional[Dict[str, str]]:
+    """
+    Zoek op Open Library met een titel/auteur-gok. Geeft de canonieke titel en
+    auteur terug als er een overtuigende match is, anders None. Geen API key
+    nodig \u2014 Open Library dekt vertaalde/Nederlandse edities vaak beter dan
+    Google Books.
+    """
+    try:
+        query = f"title={urllib.parse.quote(guess_title)}&author={urllib.parse.quote(guess_author)}"
+        url = f"https://openlibrary.org/search.json?{query}&limit=5&fields=title,author_name"
+        resp = requests.get(url, timeout=8)
+        if resp.status_code != 200:
+            return None
+
+        norm_title_guess = _normalize_for_match(guess_title)
+        norm_author_guess = _normalize_for_match(guess_author)
+
+        for doc in resp.json().get("docs", []):
+            result_title = doc.get("title", "")
+            result_authors = doc.get("author_name", [])
+            if not result_title or not result_authors:
+                continue
+
+            norm_result_title = _normalize_for_match(result_title)
+            title_ok = _similar(norm_title_guess, norm_result_title)
+            author_ok = any(_similar(norm_author_guess, _normalize_for_match(a)) for a in result_authors)
+
+            if title_ok and author_ok:
+                return {"title": result_title, "author": result_authors[0]}
+
+    except Exception as e:
+        print(f"   \u26A0\uFE0F Open Library lookup mislukt: {e}")
+
+    return None
+
+
 def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
     """
-    Bepaal welk deel de auteur is en welk de titel, en corrigeer typefouten
-    via Google Books. Probeert beide volgordes.
+    Bepaal welk deel de auteur is en welk de titel, en corrigeer typefouten.
+    Probeert beide volgordes, eerst via Google Books en dan via Open Library
+    (die vertaalde/Nederlandse edities vaak beter dekt).
 
-    Als geen van beide een overtuigende match oplevert, wordt aangenomen dat
-    het eerste deel de auteur is (de gebruikelijke volgorde) \u2014 de tekst zoals
-    getypt blijft dan gewoon staan.
+    Als geen van beide bronnen een overtuigende match oplevert, wordt
+    aangenomen dat het eerste deel de auteur is (de gebruikelijke volgorde)
+    \u2014 de tekst zoals getypt blijft dan gewoon staan.
     """
-    match = _google_books_lookup(guess_title=part_b, guess_author=part_a)
-    if match:
-        return match["author"], match["title"]
+    for lookup in (_google_books_lookup, _openlibrary_lookup):
+        match = lookup(guess_title=part_b, guess_author=part_a)
+        if match:
+            return match["author"], match["title"]
 
-    match = _google_books_lookup(guess_title=part_a, guess_author=part_b)
-    if match:
-        return match["author"], match["title"]
+        match = lookup(guess_title=part_a, guess_author=part_b)
+        if match:
+            return match["author"], match["title"]
 
-    print(f"   \u26A0\uFE0F Kon '{part_a}' / '{part_b}' niet bevestigen via Google Books, "
+    print(f"   \u26A0\uFE0F Kon '{part_a}' / '{part_b}' niet bevestigen via Google Books/Open Library, "
           f"aanname: '{part_a}' = auteur, '{part_b}' = titel")
     return part_a, part_b
 
