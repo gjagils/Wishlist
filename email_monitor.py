@@ -81,94 +81,115 @@ def _similar(a: str, b: str, threshold: float = 0.75) -> bool:
     return difflib.SequenceMatcher(None, a, b).ratio() >= threshold
 
 
-def _google_books_lookup(guess_title: str, guess_author: str) -> Optional[Dict[str, str]]:
+def _search_variants(text: str) -> List[str]:
     """
-    Zoek op Google Books met een titel/auteur-gok. Geeft de canonieke titel en
-    auteur terug (met correcte spelling) als er een overtuigende match is,
-    anders None. Geen API key nodig (zelfde aanpak als de cover-lookup).
+    Volledige tekst, plus varianten met telkens \u00E9\u00E9n woord weggelaten.
+    Vangt op dat een boeken-API vaak nul resultaten geeft zodra er ook maar
+    \u00E9\u00E9n woord in de zoekopdracht verkeerd gespeld is \u2014 met een woord minder
+    is de kans groter dat het overblijvende deel w\u00E9l treft.
     """
-    try:
-        query = f"intitle:{urllib.parse.quote(guess_title)}+inauthor:{urllib.parse.quote(guess_author)}"
-        url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=5&fields=items(volumeInfo(title,authors))"
-        resp = requests.get(url, timeout=8)
-        if resp.status_code != 200:
-            return None
+    words = text.split()
+    variants = [text]
+    if len(words) > 1:
+        for i in range(len(words)):
+            variant = ' '.join(w for j, w in enumerate(words) if j != i)
+            if variant and variant not in variants:
+                variants.append(variant)
+    return variants
 
-        norm_title_guess = _normalize_for_match(guess_title)
-        norm_author_guess = _normalize_for_match(guess_author)
 
-        for item in resp.json().get("items", []):
-            vol = item.get("volumeInfo", {})
-            result_title = vol.get("title", "")
-            result_authors = vol.get("authors", [])
-            if not result_title or not result_authors:
+def _candidate_matches_guess(title: str, author: str, part_a: str, part_b: str) -> bool:
+    """Check of een kandidaat (titel+auteur) overeenkomt met part_a/part_b, in beide volgordes."""
+    norm_title = _normalize_for_match(title)
+    norm_author = _normalize_for_match(author)
+    norm_a = _normalize_for_match(part_a)
+    norm_b = _normalize_for_match(part_b)
+
+    return ((_similar(norm_a, norm_title) and _similar(norm_b, norm_author)) or
+            (_similar(norm_b, norm_title) and _similar(norm_a, norm_author)))
+
+
+def _search_queries(part_a: str, part_b: str) -> List[str]:
+    """Zoekopdrachten om te proberen: volledige delen eerst, dan varianten met een woord weggelaten."""
+    queries = [part_a, part_b]
+    for text in (part_a, part_b):
+        for variant in _search_variants(text):
+            if variant not in queries:
+                queries.append(variant)
+    return queries
+
+
+def _google_books_lookup(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
+    """
+    Zoek op Google Books naar een boek dat overeenkomt met part_a/part_b
+    (in beide volgordes). Geeft de canonieke titel en auteur terug (met
+    correcte spelling) bij een overtuigende match, anders None. Geen API key
+    nodig (zelfde aanpak als de cover-lookup).
+    """
+    for q in _search_queries(part_a, part_b):
+        try:
+            url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(q)}&maxResults=5&fields=items(volumeInfo(title,authors))"
+            resp = requests.get(url, timeout=8)
+            if resp.status_code != 200:
                 continue
 
-            norm_result_title = _normalize_for_match(result_title)
-            title_ok = _similar(norm_title_guess, norm_result_title)
-            author_ok = any(_similar(norm_author_guess, _normalize_for_match(a)) for a in result_authors)
+            for item in resp.json().get("items", []):
+                vol = item.get("volumeInfo", {})
+                result_title = vol.get("title", "")
+                result_authors = vol.get("authors", [])
+                if not result_title or not result_authors:
+                    continue
 
-            if title_ok and author_ok:
-                return {"title": result_title, "author": result_authors[0]}
+                if _candidate_matches_guess(result_title, result_authors[0], part_a, part_b):
+                    return {"title": result_title, "author": result_authors[0]}
 
-    except Exception as e:
-        print(f"   \u26A0\uFE0F Google Books lookup mislukt: {e}")
+        except Exception as e:
+            print(f"   \u26A0\uFE0F Google Books lookup mislukt: {e}")
 
     return None
 
 
-def _openlibrary_lookup(guess_title: str, guess_author: str) -> Optional[Dict[str, str]]:
+def _openlibrary_lookup(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
     """
-    Zoek op Open Library met een titel/auteur-gok. Geeft de canonieke titel en
-    auteur terug als er een overtuigende match is, anders None. Geen API key
-    nodig \u2014 Open Library dekt vertaalde/Nederlandse edities vaak beter dan
-    Google Books.
+    Zoek op Open Library naar een boek dat overeenkomt met part_a/part_b
+    (in beide volgordes). Geeft de canonieke titel en auteur terug bij een
+    overtuigende match, anders None. Geen API key nodig \u2014 Open Library dekt
+    vertaalde/Nederlandse edities vaak beter dan Google Books.
     """
-    try:
-        query = f"title={urllib.parse.quote(guess_title)}&author={urllib.parse.quote(guess_author)}"
-        url = f"https://openlibrary.org/search.json?{query}&limit=5&fields=title,author_name"
-        resp = requests.get(url, timeout=8)
-        if resp.status_code != 200:
-            return None
-
-        norm_title_guess = _normalize_for_match(guess_title)
-        norm_author_guess = _normalize_for_match(guess_author)
-
-        for doc in resp.json().get("docs", []):
-            result_title = doc.get("title", "")
-            result_authors = doc.get("author_name", [])
-            if not result_title or not result_authors:
+    for q in _search_queries(part_a, part_b):
+        try:
+            url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(q)}&limit=5&fields=title,author_name"
+            resp = requests.get(url, timeout=8)
+            if resp.status_code != 200:
                 continue
 
-            norm_result_title = _normalize_for_match(result_title)
-            title_ok = _similar(norm_title_guess, norm_result_title)
-            author_ok = any(_similar(norm_author_guess, _normalize_for_match(a)) for a in result_authors)
+            for doc in resp.json().get("docs", []):
+                result_title = doc.get("title", "")
+                result_authors = doc.get("author_name", [])
+                if not result_title or not result_authors:
+                    continue
 
-            if title_ok and author_ok:
-                return {"title": result_title, "author": result_authors[0]}
+                if _candidate_matches_guess(result_title, result_authors[0], part_a, part_b):
+                    return {"title": result_title, "author": result_authors[0]}
 
-    except Exception as e:
-        print(f"   \u26A0\uFE0F Open Library lookup mislukt: {e}")
+        except Exception as e:
+            print(f"   \u26A0\uFE0F Open Library lookup mislukt: {e}")
 
     return None
 
 
 def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
     """
-    Bepaal welk deel de auteur is en welk de titel, en corrigeer typefouten.
-    Probeert beide volgordes, eerst via Google Books en dan via Open Library
-    (die vertaalde/Nederlandse edities vaak beter dekt).
+    Bepaal welk deel de auteur is en welk de titel, en corrigeer typefouten,
+    eerst via Google Books en dan via Open Library (die vertaalde/Nederlandse
+    edities vaak beter dekt). Beide volgordes worden gecheckt.
 
     Als geen van beide bronnen een overtuigende match oplevert, wordt
     aangenomen dat het eerste deel de auteur is (de gebruikelijke volgorde)
     \u2014 de tekst zoals getypt blijft dan gewoon staan.
     """
     for lookup in (_google_books_lookup, _openlibrary_lookup):
-        match = lookup(guess_title=part_b, guess_author=part_a)
-        if match:
-            return match["author"], match["title"]
-
-        match = lookup(guess_title=part_a, guess_author=part_b)
+        match = lookup(part_a, part_b)
         if match:
             return match["author"], match["title"]
 
