@@ -1026,12 +1026,18 @@ def api_admin_get_email_templates():
     """Haal e-mail templates op."""
     from email_sender import DEFAULT_FOUND_SUBJECT, DEFAULT_FOUND_BODY
     from email_sender import DEFAULT_SHELVED_SUBJECT, DEFAULT_SHELVED_BODY
+    from email_sender import DEFAULT_DONE_SUBJECT, DEFAULT_DONE_BODY
+    from email_sender import DEFAULT_REQUESTED_SUBJECT, DEFAULT_REQUESTED_BODY
 
     return jsonify({
         'found_subject': db.get_setting('email_found_subject', DEFAULT_FOUND_SUBJECT),
         'found_body': db.get_setting('email_found_body', DEFAULT_FOUND_BODY),
         'shelved_subject': db.get_setting('email_shelved_subject', DEFAULT_SHELVED_SUBJECT),
         'shelved_body': db.get_setting('email_shelved_body', DEFAULT_SHELVED_BODY),
+        'done_subject': db.get_setting('email_done_subject', DEFAULT_DONE_SUBJECT),
+        'done_body': db.get_setting('email_done_body', DEFAULT_DONE_BODY),
+        'requested_subject': db.get_setting('email_requested_subject', DEFAULT_REQUESTED_SUBJECT),
+        'requested_body': db.get_setting('email_requested_body', DEFAULT_REQUESTED_BODY),
     })
 
 
@@ -1044,7 +1050,8 @@ def api_admin_update_email_templates():
     if not data:
         return jsonify({'error': 'Geen data ontvangen'}), 400
 
-    for key in ['found_subject', 'found_body', 'shelved_subject', 'shelved_body']:
+    for key in ['found_subject', 'found_body', 'shelved_subject', 'shelved_body',
+                'done_subject', 'done_body', 'requested_subject', 'requested_body']:
         if key in data:
             db.set_setting(f'email_{key}', data[key])
 

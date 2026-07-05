@@ -252,6 +252,30 @@
                 </div>
             </div>
 
+            <div style="margin-bottom:20px">
+                <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:10px;color:var(--primary)">Beschikbaar-mail (geïmporteerd, geen plank ingesteld)</h3>
+                <div class="form-group">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">ONDERWERP</label>
+                    <input type="text" id="tpl-done-subject" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.9rem">
+                </div>
+                <div class="form-group" style="margin-top:10px">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">TEKST</label>
+                    <textarea id="tpl-done-body" rows="6" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.85rem;resize:vertical"></textarea>
+                </div>
+            </div>
+
+            <div style="margin-bottom:20px">
+                <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:10px;color:var(--primary)">Aanvraag ontvangen-mail (per e-mail aangevraagd)</h3>
+                <div class="form-group">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">ONDERWERP</label>
+                    <input type="text" id="tpl-requested-subject" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.9rem">
+                </div>
+                <div class="form-group" style="margin-top:10px">
+                    <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">TEKST</label>
+                    <textarea id="tpl-requested-body" rows="6" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.85rem;resize:vertical"></textarea>
+                </div>
+            </div>
+
             <button class="btn-save" onclick="saveEmailTemplates()">Templates opslaan</button>
             <span id="tpl-message" style="margin-left:12px;font-size:0.85rem"></span>
         </div>
@@ -437,6 +461,10 @@
                 document.getElementById('tpl-found-body').value = data.found_body;
                 document.getElementById('tpl-shelved-subject').value = data.shelved_subject;
                 document.getElementById('tpl-shelved-body').value = data.shelved_body;
+                document.getElementById('tpl-done-subject').value = data.done_subject;
+                document.getElementById('tpl-done-body').value = data.done_body;
+                document.getElementById('tpl-requested-subject').value = data.requested_subject;
+                document.getElementById('tpl-requested-body').value = data.requested_body;
             } catch (e) {}
         }
 
@@ -451,6 +479,10 @@
                         found_body: document.getElementById('tpl-found-body').value,
                         shelved_subject: document.getElementById('tpl-shelved-subject').value,
                         shelved_body: document.getElementById('tpl-shelved-body').value,
+                        done_subject: document.getElementById('tpl-done-subject').value,
+                        done_body: document.getElementById('tpl-done-body').value,
+                        requested_subject: document.getElementById('tpl-requested-subject').value,
+                        requested_body: document.getElementById('tpl-requested-body').value,
                     }),
                 });
                 if (resp.ok) {
