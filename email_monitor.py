@@ -172,7 +172,7 @@ def _openlibrary_lookup(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
     for q in _search_queries(part_a, part_b):
         try:
             url = f"https://openlibrary.org/search.json?q={urllib.parse.quote(q)}&limit=5&fields=title,author_name"
-            resp = requests.get(url, timeout=8)
+            resp = requests.get(url, timeout=5)
             if resp.status_code != 200:
                 continue
 
@@ -185,6 +185,10 @@ def _openlibrary_lookup(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
                 if _candidate_matches_guess(result_title, result_authors[0], part_a, part_b):
                     return {"title": result_title, "author": result_authors[0]}
 
+        except requests.exceptions.Timeout:
+            # Open Library traag/onbereikbaar \u2014 verdere pogingen hebben geen zin
+            print("   \u26A0\uFE0F Open Library lookup time-out, overgeslagen")
+            return None
         except Exception as e:
             print(f"   \u26A0\uFE0F Open Library lookup mislukt: {e}")
 
@@ -325,23 +329,16 @@ def _parse_request_line(line: str) -> Optional[Tuple[str, str, Optional[str]]]:
     return part_a, part_b, shelf
 
 
-def extract_wishlist_items(subject: str, body: str) -> List[Tuple[str, str, Optional[str]]]:
+def extract_raw_requests(subject: str, body: str) -> List[Tuple[str, str, Optional[str]]]:
     """
-    Extract wishlist items uit email subject of body.
+    Parse de ruwe 'deel - deel' regels uit onderwerp en body (optioneel gevolgd
+    door '> boekenplank'). Dit is puur tekst-splitsen \u2014 GEEN netwerk-calls \u2014 zodat
+    het veilig voor de afzendercheck kan draaien. Het resolven van welk deel de
+    auteur/titel is (via boeken-API's + AI) gebeurt pas daarna, per item.
 
-    Formaat: 'deel - deel', optioneel gevolgd door '> boekenplank'.
-    Volgorde (auteur/titel) en aanhalingstekens maken niet uit \u2014 Google Books
-    bepaalt welk deel de auteur is en welk de titel, en corrigeert typefouten.
-
-    Voorbeelden die allemaal werken:
-    - MJ Arlidge - Uit de as
-    - Uit de as - MJ Arlidge
-    - MJ Arlidge - "Uit de as" > Kobo GJ
-    - Wishlist: Arlige - uit de As  (typefout, wordt gecorrigeerd)
-
-    Returns: List van (author, title, shelf_name) tuples
+    Returns: List van (part_a, part_b, shelf_name) tuples
     """
-    items = []
+    requests_out = []
     seen = set()
 
     lines = [subject] + body.split('\n')
@@ -361,16 +358,14 @@ def extract_wishlist_items(subject: str, body: str) -> List[Tuple[str, str, Opti
             continue
 
         part_a, part_b, shelf = parsed
-        author, title = resolve_author_title(part_a, part_b)
-
-        key = (author.strip().lower(), title.strip().lower())
+        key = (part_a.lower(), part_b.lower())
         if key in seen:
             continue
         seen.add(key)
 
-        items.append((author, title, shelf))
+        requests_out.append((part_a, part_b, shelf))
 
-    return items
+    return requests_out
 
 
 def get_email_body(msg) -> str:
@@ -439,10 +434,12 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
         print(f"\n📧 Email van: {from_header}")
         print(f"   Subject: {subject}")
 
-        # Extract items (ook van niet-toegestane afzenders, om te kunnen rapporteren)
-        items = extract_wishlist_items(subject, body)
+        # Parse de ruwe aanvraagregels — puur tekst, geen netwerk. Het dure
+        # resolven (boeken-API's + AI) gebeurt pas ná de afzendercheck, zodat
+        # een niet-toegestane afzender die calls niet kan triggeren.
+        raw_requests = extract_raw_requests(subject, body)
 
-        if not items:
+        if not raw_requests:
             print("   Geen wishlist items gevonden")
             return 0
 
@@ -450,13 +447,21 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
         if not is_sender_allowed(from_header):
             print(f"   ⚠️ Sender niet toegestaan: {from_header} — admin geïnformeerd, niet toegevoegd")
             try:
-                email_sender.notify_unauthorized_request(sender_email, items)
+                email_sender.notify_unauthorized_request(sender_email, raw_requests)
             except Exception as e:
                 print(f"   ✗ Fout bij versturen admin-melding: {e}")
             return 0
 
-        # Voeg items toe
-        for author, title, shelf_name in items:
+        # Toegestane afzender: nu pas resolven (auteur/titel bepalen + corrigeren)
+        seen = set()
+        for part_a, part_b, shelf_name in raw_requests:
+            author, title = resolve_author_title(part_a, part_b)
+
+            key = (author.strip().lower(), title.strip().lower())
+            if key in seen:
+                continue
+            seen.add(key)
+
             try:
                 item_id = db.add_wishlist_item(
                     author=author,
