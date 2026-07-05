@@ -272,6 +272,10 @@ def finalize_import(item: dict, book_id: int) -> None:
 
     if not shelf_name:
         db.update_wishlist_status(item_id, "done", nzb_url=nzb_url)
+        try:
+            email_sender.notify_item_done(item)
+        except Exception as e:
+            db.add_log(item_id, "warning", f"E-mail notificatie mislukt: {e}")
         return
 
     success = calibreweb.add_book_to_shelf(shelf_name, book_id)
@@ -403,11 +407,39 @@ def check_found_items() -> None:
 CALIBRE_CHECK_SECONDS = int(os.environ.get("CALIBRE_CHECK_SECONDS", "86400"))  # 24 uur
 
 
+def check_item_in_calibre(item: dict) -> bool:
+    """
+    Check of een enkel item al in Calibre-Web bestaat. Rondt bij een match
+    meteen af via finalize_import — voorkomt een onnodige Spotweb-zoekactie
+    en download voor een boek dat er al staat.
+
+    Returns: True als het al bestond (en dus afgerond is), anders False.
+    """
+    if not calibreweb.is_configured():
+        return False
+
+    item_id = item['id']
+    author = item['author']
+    title = item['title']
+
+    try:
+        book_id = calibreweb.search_book(author, title)
+        if not book_id:
+            return False
+
+        db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre-Web (book_id={book_id})")
+        finalize_import(item, book_id)
+        return True
+
+    except Exception as e:
+        db.add_log(item_id, "error", f"Calibre-Web check fout: {e}")
+        return False
+
+
 def check_existing_in_calibre() -> None:
     """
-    Check of pending items al in Calibre-Web bestaan.
-    Voorkomt dubbele downloads — als een boek al in de bibliotheek staat,
-    wordt het direct afgerond via finalize_import.
+    Dagelijkse check of pending items al in Calibre-Web bestaan
+    (vangnet voor items die nog niet meteen bij toevoegen gecheckt zijn).
     """
     if not calibreweb.is_configured():
         return
@@ -417,21 +449,7 @@ def check_existing_in_calibre() -> None:
         return
 
     for item in pending:
-        item_id = item['id']
-        author = item['author']
-        title = item['title']
-
-        try:
-            book_id = calibreweb.search_book(author, title)
-            if not book_id:
-                continue
-
-            db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre-Web (book_id={book_id})")
-            finalize_import(item, book_id)
-
-        except Exception as e:
-            db.add_log(item_id, "error", f"Calibre-Web check fout: {e}")
-
+        check_item_in_calibre(item)
         time.sleep(2)
 
 

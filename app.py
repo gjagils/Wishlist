@@ -359,10 +359,14 @@ def api_add_wishlist():
         def _search_new_item():
             import time
             try:
-                from worker import process_item, finalize_import
+                from worker import process_item, finalize_import, check_item_in_calibre
                 fresh = db.get_wishlist_item(item_id)
                 if not fresh or fresh['status'] != 'pending':
                     return
+
+                if check_item_in_calibre(fresh):
+                    return  # Stond al in Calibre-Web, geen download nodig
+
                 process_item(fresh)
 
                 # Als found: poll Calibre-Web tot eindstatus
@@ -555,10 +559,13 @@ def api_retry_search(item_id: int):
     def _search_and_follow():
         import time
         try:
-            from worker import process_item, finalize_import
+            from worker import process_item, finalize_import, check_item_in_calibre
             fresh_item = db.get_wishlist_item(item_id)
             if not fresh_item or fresh_item['status'] != 'pending':
                 return
+
+            if check_item_in_calibre(fresh_item):
+                return  # Stond al in Calibre-Web, geen download nodig
 
             # Stap 1: zoek in Spotweb en stuur naar SABnzbd
             process_item(fresh_item)

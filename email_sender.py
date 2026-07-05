@@ -157,6 +157,27 @@ def notify_item_shelved(item: dict) -> None:
                           _render_template(body_tpl, item))
 
 
+DEFAULT_DONE_SUBJECT = "📚 {title} - {author} is beschikbaar!"
+DEFAULT_DONE_BODY = """Hoi!
+
+"{title}" van {author} staat klaar in de bibliotheek!
+
+Open Calibre-Web om het boek te lezen:
+https://boekjes.gerdjan.nl
+
+Groetjes,
+Boekjes van Gerd-Jan"""
+
+
+def notify_item_done(item: dict) -> None:
+    """Stuur notificatie dat een boek beschikbaar is (geen boekenplank ingesteld)."""
+    subject_tpl = db.get_setting("email_done_subject", DEFAULT_DONE_SUBJECT)
+    body_tpl = db.get_setting("email_done_body", DEFAULT_DONE_BODY)
+
+    _send_with_admin_copy(item, _render_template(subject_tpl, item),
+                          _render_template(body_tpl, item))
+
+
 DEFAULT_REQUESTED_SUBJECT = "📬 Aanvraag ontvangen: {title} - {author}"
 DEFAULT_REQUESTED_BODY = """Hoi!
 

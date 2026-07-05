@@ -23,6 +23,7 @@ from typing import List, Tuple, Optional, Dict
 
 import database as db
 import email_sender
+import worker
 
 # Config
 IMAP_SERVER = os.environ.get('EMAIL_IMAP_SERVER', 'imap.gmail.com')
@@ -345,10 +346,21 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
                 print(f"   ✓ Toegevoegd: {author} - \"{title}\"{shelf_msg}")
                 added_count += 1
 
+                fresh_item = db.get_wishlist_item(item_id)
+
+                already_exists = False
                 try:
-                    email_sender.notify_item_requested(db.get_wishlist_item(item_id))
+                    already_exists = worker.check_item_in_calibre(fresh_item)
+                    if already_exists:
+                        print(f"   ✓ Stond al in Calibre-Web, direct afgerond")
                 except Exception as e:
-                    print(f"   ✗ Fout bij versturen bevestiging: {e}")
+                    print(f"   ✗ Fout bij Calibre-Web check: {e}")
+
+                if not already_exists:
+                    try:
+                        email_sender.notify_item_requested(fresh_item)
+                    except Exception as e:
+                        print(f"   ✗ Fout bij versturen bevestiging: {e}")
 
             except ValueError as e:
                 # Duplicaat
