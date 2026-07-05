@@ -219,12 +219,13 @@ def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
                 "messages": [{
                     "role": "user",
                     "content": (
-                        f'Dit is een mogelijk verhaspelde auteur en boektitel van een bestaand boek, '
-                        f'volgorde onbekend: "{part_a} - {part_b}". '
-                        f'Antwoord uitsluitend met JSON: {{"auteur": "...", "titel": "..."}} '
-                        f'met de correcte spelling van de echte auteursnaam en boektitel '
-                        f'(gebruik de titel in dezelfde taal als de invoer). '
-                        f'Herken je het boek niet, antwoord dan {{"auteur": null, "titel": null}}.'
+                        f'Hier staan een auteursnaam en een boektitel met mogelijk spelfouten, '
+                        f'volgorde onbekend: "{part_a}" en "{part_b}". '
+                        f'Corrigeer alleen de SPELLING van de auteursnaam en de titel en bepaal welk '
+                        f'deel de auteur is en welk de titel. Verzin GEEN ander boek en verander de '
+                        f'woorden niet inhoudelijk — blijf zo dicht mogelijk bij de invoer. Behoud de '
+                        f'taal van de titel. Antwoord uitsluitend met JSON: '
+                        f'{{"auteur": "...", "titel": "..."}}.'
                     ),
                 }],
             },
@@ -243,10 +244,10 @@ def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
 
         data = json.loads(json_match.group(0))
         if data.get("auteur") and data.get("titel"):
-            print(f"   [AI] AI stelt voor: {data['auteur']} - \"{data['titel']}\"")
+            print(f"   [AI] AI-spellingcorrectie: {data['auteur']} - \"{data['titel']}\"")
             return {"author": str(data["auteur"]), "title": str(data["titel"])}
 
-        print(f"   [AI] AI herkende het boek niet")
+        print(f"   [AI] AI gaf geen bruikbare correctie")
 
     except Exception as e:
         print(f"   \u26A0\uFE0F AI-normalisatie mislukt: {e}")
@@ -260,12 +261,14 @@ def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
     eerst via Google Books en dan via Open Library (die vertaalde/Nederlandse
     edities vaak beter dekt). Beide volgordes worden gecheckt.
 
-    Vinden die niets (bv. omdat elk woord een typefout bevat), dan mag
-    Claude Haiku een normalisatie voorstellen. Die wordt alleen overgenomen
-    als (a) Google Books/Open Library het als echt boek bevestigt \u00E9n (b) het
-    bevestigde boek nog voldoende lijkt op de oorspronkelijke invoer \u2014 anders
-    zou een gehallucineerd maar bestaand boek (bv. "samel bork - dodsvogel"
-    \u2192 Beckett/Molloy) er onterecht doorheen glippen.
+    Vinden die niets (bv. omdat elk woord een typefout bevat), dan corrigeert
+    Claude Haiku de spelling (geen boek-identificatie \u2014 dat faalt bij recente
+    titels die het model niet kent). De correctie wordt alleen overgenomen als
+    hij nog voldoende op de oorspronkelijke invoer lijkt (anti-hallucinatie:
+    "samel bork - dodsvogel" \u2192 Beckett/Molloy wordt zo verworpen). Voor de
+    canonieke schrijfwijze wordt de gecorrigeerde tekst nog eens via de
+    boeken-API's geprobeerd; kent geen enkele bron het boek (recent), dan
+    wordt de spellingcorrectie zelf gebruikt.
 
     Als niets een overtuigende match oplevert, wordt aangenomen dat het
     eerste deel de auteur is (de gebruikelijke volgorde) \u2014 de tekst zoals
@@ -277,17 +280,24 @@ def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
             return match["author"], match["title"]
 
     llm = _llm_normalize(part_a, part_b)
-    if llm:
+    if llm and _candidate_matches_guess(llm["title"], llm["author"], part_a, part_b):
+        # Probeer de canonieke schrijfwijze uit de boeken-API's met de
+        # gecorrigeerde spelling; anders de correctie zelf gebruiken.
         for lookup in (_google_books_lookup, _openlibrary_lookup):
             match = lookup(llm["author"], llm["title"])
             if match and _candidate_matches_guess(match["title"], match["author"], part_a, part_b):
-                print(f"   \u2713 AI-normalisatie geverifieerd: '{part_a} - {part_b}' "
+                print(f"   \u2713 AI-correctie + boeken-API: '{part_a} - {part_b}' "
                       f"\u2192 {match['author']} - \"{match['title']}\"")
                 return match["author"], match["title"]
-        print(f"   \u26A0\uFE0F AI-suggestie ({llm['author']} - \"{llm['title']}\") lijkt niet op de "
-              f"aanvraag of niet te verifi\u00EBren \u2014 genegeerd")
+        print(f"   \u2713 AI-spellingcorrectie gebruikt (niet in boeken-API, bv. recent boek): "
+              f"'{part_a} - {part_b}' \u2192 {llm['author']} - \"{llm['title']}\"")
+        return llm["author"], llm["title"]
 
-    print(f"   \u26A0\uFE0F Kon '{part_a}' / '{part_b}' niet bevestigen via Google Books/Open Library, "
+    if llm:
+        print(f"   \u26A0\uFE0F AI-suggestie ({llm['author']} - \"{llm['title']}\") lijkt niet op de "
+              f"aanvraag \u2014 genegeerd")
+
+    print(f"   \u26A0\uFE0F Kon '{part_a}' / '{part_b}' niet bevestigen, "
           f"aanname: '{part_a}' = auteur, '{part_b}' = titel")
     return part_a, part_b
 
