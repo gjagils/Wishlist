@@ -13,6 +13,7 @@ import os
 import time
 import imaplib
 import email
+import json
 import urllib.parse
 import difflib
 from email.header import decode_header
@@ -31,6 +32,7 @@ IMAP_PORT = int(os.environ.get('EMAIL_IMAP_PORT', '993'))
 EMAIL_ADDRESS = os.environ.get('EMAIL_ADDRESS', '')
 EMAIL_PASSWORD = os.environ.get('EMAIL_PASSWORD', '')
 CHECK_INTERVAL = int(os.environ.get('EMAIL_CHECK_INTERVAL', '300'))  # 5 minuten
+ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
 # Mailbox settings
 INBOX_FOLDER = os.environ.get('EMAIL_INBOX_FOLDER', 'INBOX')
@@ -178,20 +180,90 @@ def _openlibrary_lookup(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
     return None
 
 
+def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
+    """
+    Laatste redmiddel bij zware verhaspeling: vraag Claude Haiku welke echte
+    auteur en boektitel bedoeld worden. De uitkomst wordt daarna nog
+    geverifieerd via Google Books/Open Library (in resolve_author_title),
+    zodat een gehallucineerde suggestie nooit ongecontroleerd doorgaat.
+    """
+    if not ANTHROPIC_API_KEY:
+        return None
+
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 200,
+                "messages": [{
+                    "role": "user",
+                    "content": (
+                        f'Dit is een mogelijk verhaspelde auteur en boektitel van een bestaand boek, '
+                        f'volgorde onbekend: "{part_a} - {part_b}". '
+                        f'Antwoord uitsluitend met JSON: {{"auteur": "...", "titel": "..."}} '
+                        f'met de correcte spelling van de echte auteursnaam en boektitel '
+                        f'(gebruik de titel in dezelfde taal als de invoer). '
+                        f'Herken je het boek niet, antwoord dan {{"auteur": null, "titel": null}}.'
+                    ),
+                }],
+            },
+            timeout=15,
+        )
+
+        if resp.status_code != 200:
+            print(f"   \u26A0\uFE0F AI-normalisatie mislukt: status={resp.status_code}")
+            return None
+
+        text = resp.json()["content"][0]["text"]
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if not json_match:
+            return None
+
+        data = json.loads(json_match.group(0))
+        if data.get("auteur") and data.get("titel"):
+            return {"author": str(data["auteur"]), "title": str(data["titel"])}
+
+    except Exception as e:
+        print(f"   \u26A0\uFE0F AI-normalisatie mislukt: {e}")
+
+    return None
+
+
 def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
     """
     Bepaal welk deel de auteur is en welk de titel, en corrigeer typefouten,
     eerst via Google Books en dan via Open Library (die vertaalde/Nederlandse
     edities vaak beter dekt). Beide volgordes worden gecheckt.
 
-    Als geen van beide bronnen een overtuigende match oplevert, wordt
-    aangenomen dat het eerste deel de auteur is (de gebruikelijke volgorde)
-    \u2014 de tekst zoals getypt blijft dan gewoon staan.
+    Vinden die niets (bv. omdat elk woord een typefout bevat), dan mag
+    Claude Haiku een normalisatie voorstellen \u2014 die alleen wordt overgenomen
+    als Google Books/Open Library de suggestie daarna w\u00E9l kan bevestigen.
+
+    Als niets een overtuigende match oplevert, wordt aangenomen dat het
+    eerste deel de auteur is (de gebruikelijke volgorde) \u2014 de tekst zoals
+    getypt blijft dan gewoon staan.
     """
     for lookup in (_google_books_lookup, _openlibrary_lookup):
         match = lookup(part_a, part_b)
         if match:
             return match["author"], match["title"]
+
+    llm = _llm_normalize(part_a, part_b)
+    if llm:
+        for lookup in (_google_books_lookup, _openlibrary_lookup):
+            match = lookup(llm["author"], llm["title"])
+            if match:
+                print(f"   \u2713 AI-normalisatie geverifieerd: '{part_a} - {part_b}' "
+                      f"\u2192 {match['author']} - \"{match['title']}\"")
+                return match["author"], match["title"]
+        print(f"   \u26A0\uFE0F AI-suggestie ({llm['author']} - \"{llm['title']}\") niet te verifi\u00EBren "
+              f"via Google Books/Open Library \u2014 genegeerd")
 
     print(f"   \u26A0\uFE0F Kon '{part_a}' / '{part_b}' niet bevestigen via Google Books/Open Library, "
           f"aanname: '{part_a}' = auteur, '{part_b}' = titel")
