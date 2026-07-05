@@ -13,10 +13,13 @@ import os
 import time
 import imaplib
 import email
+import urllib.parse
+import difflib
 from email.header import decode_header
 from email.utils import parseaddr
 import re
-from typing import List, Tuple, Optional
+import requests
+from typing import List, Tuple, Optional, Dict
 
 import database as db
 import email_sender
@@ -63,48 +66,147 @@ def decode_header_value(header_value: str) -> str:
     return ''.join(result)
 
 
+def _normalize_for_match(text: str) -> str:
+    """Reduceer tot kale alfanumerieke tekens voor tolerante vergelijking."""
+    return re.sub(r'[^a-z0-9]+', '', text.lower())
+
+
+def _similar(a: str, b: str, threshold: float = 0.75) -> bool:
+    """Tolerante vergelijking: substring, of voldoende gelijkend (typefouten)."""
+    if not a or not b:
+        return False
+    if a in b or b in a:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= threshold
+
+
+def _google_books_lookup(guess_title: str, guess_author: str) -> Optional[Dict[str, str]]:
+    """
+    Zoek op Google Books met een titel/auteur-gok. Geeft de canonieke titel en
+    auteur terug (met correcte spelling) als er een overtuigende match is,
+    anders None. Geen API key nodig (zelfde aanpak als de cover-lookup).
+    """
+    try:
+        query = f"intitle:{urllib.parse.quote(guess_title)}+inauthor:{urllib.parse.quote(guess_author)}"
+        url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=5&fields=items(volumeInfo(title,authors))"
+        resp = requests.get(url, timeout=8)
+        if resp.status_code != 200:
+            return None
+
+        norm_title_guess = _normalize_for_match(guess_title)
+        norm_author_guess = _normalize_for_match(guess_author)
+
+        for item in resp.json().get("items", []):
+            vol = item.get("volumeInfo", {})
+            result_title = vol.get("title", "")
+            result_authors = vol.get("authors", [])
+            if not result_title or not result_authors:
+                continue
+
+            norm_result_title = _normalize_for_match(result_title)
+            title_ok = _similar(norm_title_guess, norm_result_title)
+            author_ok = any(_similar(norm_author_guess, _normalize_for_match(a)) for a in result_authors)
+
+            if title_ok and author_ok:
+                return {"title": result_title, "author": result_authors[0]}
+
+    except Exception as e:
+        print(f"   \u26A0\uFE0F Google Books lookup mislukt: {e}")
+
+    return None
+
+
+def resolve_author_title(part_a: str, part_b: str) -> Tuple[str, str]:
+    """
+    Bepaal welk deel de auteur is en welk de titel, en corrigeer typefouten
+    via Google Books. Probeert beide volgordes.
+
+    Als geen van beide een overtuigende match oplevert, wordt aangenomen dat
+    het eerste deel de auteur is (de gebruikelijke volgorde) \u2014 de tekst zoals
+    getypt blijft dan gewoon staan.
+    """
+    match = _google_books_lookup(guess_title=part_b, guess_author=part_a)
+    if match:
+        return match["author"], match["title"]
+
+    match = _google_books_lookup(guess_title=part_a, guess_author=part_b)
+    if match:
+        return match["author"], match["title"]
+
+    print(f"   \u26A0\uFE0F Kon '{part_a}' / '{part_b}' niet bevestigen via Google Books, "
+          f"aanname: '{part_a}' = auteur, '{part_b}' = titel")
+    return part_a, part_b
+
+
+def _parse_request_line(line: str) -> Optional[Tuple[str, str, Optional[str]]]:
+    """
+    Parse een regel als 'deel - deel', met optioneel '> plank' erachter.
+    Aanhalingstekens rond een van beide delen zijn toegestaan maar niet
+    verplicht; welk deel auteur/titel is wordt later bepaald.
+    """
+    shelf = None
+    shelf_match = re.search(r'>\s*(.+)$', line)
+    if shelf_match:
+        shelf = shelf_match.group(1).strip() or None
+        line = line[:shelf_match.start()].strip()
+
+    parts = re.split(r'\s+-\s+', line, maxsplit=1)
+    if len(parts) != 2:
+        return None
+
+    part_a = parts[0].strip(' \t"\u201C\u201D')
+    part_b = parts[1].strip(' \t"\u201C\u201D')
+
+    if not part_a or not part_b:
+        return None
+
+    return part_a, part_b, shelf
+
+
 def extract_wishlist_items(subject: str, body: str) -> List[Tuple[str, str, Optional[str]]]:
     """
     Extract wishlist items uit email subject of body.
 
-    Formaten:
-    - auteur - "titel"
-    - auteur - "titel" > boekenplank
-    - Wishlist: auteur - "titel"
-    - Voeg toe: auteur - "titel" > boekenplank
+    Formaat: 'deel - deel', optioneel gevolgd door '> boekenplank'.
+    Volgorde (auteur/titel) en aanhalingstekens maken niet uit \u2014 Google Books
+    bepaalt welk deel de auteur is en welk de titel, en corrigeert typefouten.
+
+    Voorbeelden die allemaal werken:
+    - MJ Arlidge - Uit de as
+    - Uit de as - MJ Arlidge
+    - MJ Arlidge - "Uit de as" > Kobo GJ
+    - Wishlist: Arlige - uit de As  (typefout, wordt gecorrigeerd)
 
     Returns: List van (author, title, shelf_name) tuples
     """
     items = []
+    seen = set()
 
-    # Patroon: auteur - "titel" optioneel > plank
-    pattern = r'([^-"]+?)\s*-\s*["\u201C]([^"\u201D]+)["\u201D]\s*(?:>\s*(.+?))?\s*$'
+    lines = [subject] + body.split('\n')
 
-    # Probeer subject
-    for match in re.finditer(pattern, subject):
-        author = match.group(1).strip()
-        title = match.group(2).strip()
-        shelf = (match.group(3) or '').strip() or None
-        if author and title:
-            items.append((author, title, shelf))
-
-    # Probeer body (elke regel)
-    for line in body.split('\n'):
+    for line in lines:
         line = line.strip()
 
-        # Skip lege regels en replies
+        # Skip lege regels en reply-quotes
         if not line or line.startswith('>'):
             continue
 
         # Verwijder prefixes
         line = re.sub(r'^(wishlist|voeg toe|add):\s*', '', line, flags=re.IGNORECASE)
 
-        for match in re.finditer(pattern, line):
-            author = match.group(1).strip()
-            title = match.group(2).strip()
-            shelf = (match.group(3) or '').strip() or None
-            if author and title:
-                items.append((author, title, shelf))
+        parsed = _parse_request_line(line)
+        if not parsed:
+            continue
+
+        part_a, part_b, shelf = parsed
+        author, title = resolve_author_title(part_a, part_b)
+
+        key = (author.strip().lower(), title.strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+
+        items.append((author, title, shelf))
 
     return items
 
