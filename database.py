@@ -121,6 +121,13 @@ def init_db() -> None:
             conn.execute("ALTER TABLE wishlist ADD COLUMN user_id INTEGER REFERENCES users(id)")
             print("Database migratie: user_id kolom toegevoegd")
 
+        # Migratie: voeg requester_email toe (afzender van e-mail aanvragen zonder account)
+        try:
+            conn.execute("SELECT requester_email FROM wishlist LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE wishlist ADD COLUMN requester_email TEXT")
+            print("Database migratie: requester_email kolom toegevoegd")
+
         # Seed admin user als users tabel leeg is
         admin_username = os.environ.get('WEB_USERNAME', 'admin')
         existing_admin = conn.execute(
@@ -208,7 +215,8 @@ def migrate_from_txt(txt_path: str) -> int:
 
 def add_wishlist_item(author: str, title: str, added_via: str = "web",
                      shelf_name: Optional[str] = None,
-                     user_id: Optional[int] = None) -> int:
+                     user_id: Optional[int] = None,
+                     requester_email: Optional[str] = None) -> int:
     """Voeg nieuw item toe aan wishlist."""
     raw_line = f'{author} - "{title}"'
 
@@ -223,9 +231,9 @@ def add_wishlist_item(author: str, title: str, added_via: str = "web",
             raise ValueError(f"Item bestaat al: {raw_line}")
 
         cursor = conn.execute(
-            """INSERT INTO wishlist (author, title, raw_line, added_via, shelf_name, user_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (author, title, raw_line, added_via, shelf_name, user_id)
+            """INSERT INTO wishlist (author, title, raw_line, added_via, shelf_name, user_id, requester_email)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (author, title, raw_line, added_via, shelf_name, user_id, requester_email)
         )
         item_id = cursor.lastrowid
 

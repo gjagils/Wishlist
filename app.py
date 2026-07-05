@@ -1044,6 +1044,31 @@ def api_admin_update_email_templates():
     return jsonify({'message': 'E-mail templates opgeslagen'})
 
 
+@app.route('/api/admin/email-settings', methods=['GET'])
+@requires_auth
+@requires_admin
+def api_admin_get_email_settings():
+    """Haal e-mail monitoring instellingen op (toegestane afzenders)."""
+    return jsonify({
+        'allowed_senders': db.get_setting('email_allowed_senders', os.environ.get('EMAIL_ALLOWED_SENDERS', '')),
+    })
+
+
+@app.route('/api/admin/email-settings', methods=['PUT'])
+@requires_auth
+@requires_admin
+def api_admin_update_email_settings():
+    """Update e-mail monitoring instellingen."""
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Geen data ontvangen'}), 400
+
+    if 'allowed_senders' in data:
+        db.set_setting('email_allowed_senders', data['allowed_senders'])
+
+    return jsonify({'message': 'E-mail instellingen opgeslagen'})
+
+
 @app.route('/api/admin/reset-covers', methods=['POST'])
 @requires_auth
 @requires_admin

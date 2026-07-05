@@ -57,13 +57,13 @@ def send_notification(to_emails: List[str], subject: str, body: str) -> bool:
 
 
 def _get_owner_email(item: dict) -> Optional[str]:
-    """Haal e-mailadres van de item-eigenaar op."""
+    """Haal e-mailadres van de item-eigenaar op (account, of anders de aanvrager per e-mail)."""
     user_id = item.get("user_id")
     if user_id:
         user = db.get_user_by_id(user_id)
         if user and user.get("email"):
             return user["email"]
-    return None
+    return item.get("requester_email") or None
 
 
 def _get_admin_emails() -> List[str]:
@@ -72,10 +72,12 @@ def _get_admin_emails() -> List[str]:
 
 
 def _is_admin_item(item: dict) -> bool:
-    """Check of het item van een admin is."""
+    """Check of het item van een admin is (dus geen aparte admin-kopie nodig)."""
     user_id = item.get("user_id")
     if not user_id:
-        return True  # Geen user_id = legacy admin item
+        # Geen user_id: legacy admin item, tenzij het een e-mail aanvraag van
+        # iemand zonder account is — die moet wél een admin-kopie krijgen.
+        return item.get("added_via") != "email"
     user = db.get_user_by_id(user_id)
     return user and user.get("role") == "admin"
 
@@ -153,3 +155,51 @@ def notify_item_shelved(item: dict) -> None:
 
     _send_with_admin_copy(item, _render_template(subject_tpl, item),
                           _render_template(body_tpl, item))
+
+
+DEFAULT_REQUESTED_SUBJECT = "📬 Aanvraag ontvangen: {title} - {author}"
+DEFAULT_REQUESTED_BODY = """Hoi!
+
+We hebben je aanvraag voor "{title}" van {author} ontvangen en toegevoegd aan de wishlist.
+
+Je krijgt een mailtje zodra het boek gevonden is.
+
+Groetjes,
+Boekjes van Gerd-Jan"""
+
+
+def notify_item_requested(item: dict) -> None:
+    """Stuur bevestiging dat een aanvraag (bv. per e-mail) ontvangen en toegevoegd is."""
+    subject_tpl = db.get_setting("email_requested_subject", DEFAULT_REQUESTED_SUBJECT)
+    body_tpl = db.get_setting("email_requested_body", DEFAULT_REQUESTED_BODY)
+
+    _send_with_admin_copy(item, _render_template(subject_tpl, item),
+                          _render_template(body_tpl, item))
+
+
+def notify_unauthorized_request(sender_email: str, items: List[tuple]) -> None:
+    """
+    Stuur alleen de admins een melding van een wishlist-aanvraag per e-mail
+    van een afzender die niet op de EMAIL_ALLOWED_SENDERS-lijst staat.
+    Het item wordt NIET toegevoegd — de admin beslist of het alsnog moet.
+    """
+    admin_emails = _get_admin_emails()
+    if not admin_emails:
+        return
+
+    lines = "\n".join(
+        f"- {author} - \"{title}\"" + (f" > {shelf}" if shelf else "")
+        for author, title, shelf in items
+    )
+
+    subject = f"⚠️ Wishlist-aanvraag van ongeautoriseerd adres: {sender_email}"
+    body = f"""Er kwam een wishlist-aanvraag binnen per e-mail van een adres dat niet op de toegestane lijst (EMAIL_ALLOWED_SENDERS) staat.
+
+Afzender: {sender_email}
+
+Aanvraag:
+{lines}
+
+Dit is NIET toegevoegd aan de wishlist. Voeg {sender_email} toe aan EMAIL_ALLOWED_SENDERS als je dit wilt toestaan, of voeg het boek zelf handmatig toe via de Wishlist-app."""
+
+    send_notification(admin_emails, subject, body)

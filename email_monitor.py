@@ -14,10 +14,12 @@ import time
 import imaplib
 import email
 from email.header import decode_header
+from email.utils import parseaddr
 import re
 from typing import List, Tuple, Optional
 
 import database as db
+import email_sender
 
 # Config
 IMAP_SERVER = os.environ.get('EMAIL_IMAP_SERVER', 'imap.gmail.com')
@@ -29,7 +31,16 @@ CHECK_INTERVAL = int(os.environ.get('EMAIL_CHECK_INTERVAL', '300'))  # 5 minuten
 # Mailbox settings
 INBOX_FOLDER = os.environ.get('EMAIL_INBOX_FOLDER', 'INBOX')
 PROCESSED_FOLDER = os.environ.get('EMAIL_PROCESSED_FOLDER', 'Wishlist/Processed')
-ALLOWED_SENDERS = os.environ.get('EMAIL_ALLOWED_SENDERS', '').split(',')
+
+
+def get_allowed_senders() -> List[str]:
+    """
+    Haal de toegestane afzenders op. Beheerbaar via het admin panel
+    (opgeslagen in de settings-tabel); valt terug op EMAIL_ALLOWED_SENDERS
+    als er nog niets via het admin panel is ingesteld.
+    """
+    raw = db.get_setting('email_allowed_senders', os.environ.get('EMAIL_ALLOWED_SENDERS', ''))
+    return [s.strip() for s in (raw or '').split(',') if s.strip()]
 
 
 def decode_header_value(header_value: str) -> str:
@@ -128,13 +139,14 @@ def get_email_body(msg) -> str:
 
 def is_sender_allowed(sender: str) -> bool:
     """Check of sender toegestaan is."""
-    if not ALLOWED_SENDERS or not ALLOWED_SENDERS[0]:
+    allowed_senders = get_allowed_senders()
+    if not allowed_senders:
         # Geen whitelist = alle senders toegestaan
         return True
 
     sender_lower = sender.lower()
-    for allowed in ALLOWED_SENDERS:
-        if allowed.strip().lower() in sender_lower:
+    for allowed in allowed_senders:
+        if allowed.lower() in sender_lower:
             return True
 
     return False
@@ -155,22 +167,28 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
 
         # Parse headers
         from_header = decode_header_value(msg.get('From', ''))
+        _, sender_email = parseaddr(from_header)
+        sender_email = sender_email.lower()
         subject = decode_header_value(msg.get('Subject', ''))
         body = get_email_body(msg)
 
         print(f"\n📧 Email van: {from_header}")
         print(f"   Subject: {subject}")
 
-        # Check sender
-        if not is_sender_allowed(from_header):
-            print(f"   ⚠️ Sender niet toegestaan: {from_header}")
-            return 0
-
-        # Extract items
+        # Extract items (ook van niet-toegestane afzenders, om te kunnen rapporteren)
         items = extract_wishlist_items(subject, body)
 
         if not items:
             print("   Geen wishlist items gevonden")
+            return 0
+
+        # Check sender
+        if not is_sender_allowed(from_header):
+            print(f"   ⚠️ Sender niet toegestaan: {from_header} — admin geïnformeerd, niet toegevoegd")
+            try:
+                email_sender.notify_unauthorized_request(sender_email, items)
+            except Exception as e:
+                print(f"   ✗ Fout bij versturen admin-melding: {e}")
             return 0
 
         # Voeg items toe
@@ -180,11 +198,17 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
                     author=author,
                     title=title,
                     added_via='email',
-                    shelf_name=shelf_name
+                    shelf_name=shelf_name,
+                    requester_email=sender_email
                 )
                 shelf_msg = f" → {shelf_name}" if shelf_name else ""
                 print(f"   ✓ Toegevoegd: {author} - \"{title}\"{shelf_msg}")
                 added_count += 1
+
+                try:
+                    email_sender.notify_item_requested(db.get_wishlist_item(item_id))
+                except Exception as e:
+                    print(f"   ✗ Fout bij versturen bevestiging: {e}")
 
             except ValueError as e:
                 # Duplicaat
@@ -243,9 +267,12 @@ def check_mailbox() -> int:
         for email_id in email_ids:
             added = process_email(mail, email_id)
 
+            # Altijd markeren als gelezen zodra verwerkt, anders wordt een
+            # niet-toegestane of onherkende email bij elke check opnieuw
+            # opgepakt (en stuurt bv. steeds opnieuw een admin-melding).
+            mail.store(email_id, '+FLAGS', '\\Seen')
+
             if added > 0:
-                # Markeer als gelezen
-                mail.store(email_id, '+FLAGS', '\\Seen')
                 processed_count += 1
 
                 # Optioneel: verplaats naar processed folder
@@ -280,8 +307,9 @@ def main():
     print(f"   Account: {EMAIL_ADDRESS}")
     print(f"   Interval: {CHECK_INTERVAL}s")
 
-    if ALLOWED_SENDERS and ALLOWED_SENDERS[0]:
-        print(f"   Whitelist: {', '.join(ALLOWED_SENDERS)}")
+    allowed_senders = get_allowed_senders()
+    if allowed_senders:
+        print(f"   Whitelist: {', '.join(allowed_senders)} (via admin panel of EMAIL_ALLOWED_SENDERS)")
     else:
         print("   ⚠️ Geen sender whitelist - alle emails worden geaccepteerd")
 

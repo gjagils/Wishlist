@@ -255,6 +255,20 @@
             <button class="btn-save" onclick="saveEmailTemplates()">Templates opslaan</button>
             <span id="tpl-message" style="margin-left:12px;font-size:0.85rem"></span>
         </div>
+
+        <div class="card" style="background:var(--white);border-radius:12px;padding:24px 28px;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-top:20px">
+            <h2 style="font-family:var(--font-heading);font-size:1.1rem;font-weight:600;margin-bottom:18px;border-bottom:2px solid var(--neutral-200);padding-bottom:10px">E-mail monitoring</h2>
+            <p style="color:var(--neutral-500);font-size:0.8rem;margin-bottom:16px">
+                Afzenders die per e-mail boekjes mogen aanvragen. Komma-gescheiden, mag een deel van het adres zijn (bv. <code>nelleke@</code>).
+                Een aanvraag van een niet-toegestaan adres wordt niet toegevoegd — jij krijgt dan alleen een melding.
+            </p>
+            <div class="form-group">
+                <label style="display:block;font-size:0.7rem;font-weight:600;letter-spacing:0.05em;color:var(--neutral-500);margin-bottom:6px">TOEGESTANE AFZENDERS</label>
+                <input type="text" id="allowed-senders" placeholder="nelleke@gmail.com, partner@gmail.com" style="width:100%;padding:10px 14px;border:1.5px solid var(--neutral-200);border-radius:8px;font-family:var(--font-body);font-size:0.9rem">
+            </div>
+            <button class="btn-save" style="margin-top:14px" onclick="saveEmailSettings()">Opslaan</button>
+            <span id="email-settings-message" style="margin-left:12px;font-size:0.85rem"></span>
+        </div>
     </div>
 
     <script>
@@ -264,6 +278,7 @@
         document.addEventListener('DOMContentLoaded', () => {
             loadShelves().then(() => loadUsers());
             loadEmailTemplates();
+            loadEmailSettings();
         });
 
         async function loadShelves() {
@@ -436,6 +451,39 @@
                         found_body: document.getElementById('tpl-found-body').value,
                         shelved_subject: document.getElementById('tpl-shelved-subject').value,
                         shelved_body: document.getElementById('tpl-shelved-body').value,
+                    }),
+                });
+                if (resp.ok) {
+                    msg.textContent = '✓ Opgeslagen';
+                    msg.style.color = 'var(--primary)';
+                } else {
+                    msg.textContent = 'Opslaan mislukt';
+                    msg.style.color = 'var(--danger)';
+                }
+            } catch (e) {
+                msg.textContent = 'Netwerkfout';
+                msg.style.color = 'var(--danger)';
+            }
+            setTimeout(() => msg.textContent = '', 3000);
+        }
+
+        async function loadEmailSettings() {
+            try {
+                const resp = await fetch('/api/admin/email-settings');
+                if (!resp.ok) return;
+                const data = await resp.json();
+                document.getElementById('allowed-senders').value = data.allowed_senders || '';
+            } catch (e) {}
+        }
+
+        async function saveEmailSettings() {
+            const msg = document.getElementById('email-settings-message');
+            try {
+                const resp = await fetch('/api/admin/email-settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        allowed_senders: document.getElementById('allowed-senders').value,
                     }),
                 });
                 if (resp.ok) {
