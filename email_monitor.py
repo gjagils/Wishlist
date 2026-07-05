@@ -34,7 +34,7 @@ CHECK_INTERVAL = int(os.environ.get('EMAIL_CHECK_INTERVAL', '300'))  # 5 minuten
 
 # Mailbox settings
 INBOX_FOLDER = os.environ.get('EMAIL_INBOX_FOLDER', 'INBOX')
-PROCESSED_FOLDER = os.environ.get('EMAIL_PROCESSED_FOLDER', 'Wishlist/Processed')
+PROCESSED_FOLDER = os.environ.get('EMAIL_PROCESSED_FOLDER', 'Archive')
 
 
 def get_allowed_senders() -> List[str]:
@@ -416,6 +416,7 @@ def check_mailbox() -> int:
             return 0
 
         # Verwerk elke email
+        moved_count = 0
         for email_id in email_ids:
             added = process_email(mail, email_id)
 
@@ -427,17 +428,19 @@ def check_mailbox() -> int:
             if added > 0:
                 processed_count += 1
 
-                # Optioneel: verplaats naar processed folder
-                # (hiervoor moet je de folder eerst aanmaken in Gmail)
-                try:
-                    if PROCESSED_FOLDER and PROCESSED_FOLDER != INBOX_FOLDER:
-                        mail.copy(email_id, PROCESSED_FOLDER)
-                        mail.store(email_id, '+FLAGS', '\\Deleted')
-                except Exception as e:
-                    print(f"   Kon niet verplaatsen naar {PROCESSED_FOLDER}: {e}")
+            # Verplaats elke verwerkte email naar Archive, ongeacht uitkomst —
+            # zo blijft de inbox leeg, en betekent iets dat blijft staan dat
+            # de monitor het nooit heeft opgepakt.
+            try:
+                if PROCESSED_FOLDER and PROCESSED_FOLDER != INBOX_FOLDER:
+                    mail.copy(email_id, PROCESSED_FOLDER)
+                    mail.store(email_id, '+FLAGS', '\\Deleted')
+                    moved_count += 1
+            except Exception as e:
+                print(f"   Kon niet verplaatsen naar {PROCESSED_FOLDER}: {e}")
 
         # Cleanup
-        if processed_count > 0:
+        if moved_count > 0:
             mail.expunge()
 
         mail.close()
