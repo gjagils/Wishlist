@@ -219,13 +219,14 @@ def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
                 "messages": [{
                     "role": "user",
                     "content": (
-                        f'Hier staan een auteursnaam en een boektitel met mogelijk spelfouten, '
+                        f'Hier staan een auteursnaam en een boektitel met spelfouten, '
                         f'volgorde onbekend: "{part_a}" en "{part_b}". '
-                        f'Corrigeer alleen de SPELLING van de auteursnaam en de titel en bepaal welk '
-                        f'deel de auteur is en welk de titel. Verzin GEEN ander boek en verander de '
-                        f'woorden niet inhoudelijk — blijf zo dicht mogelijk bij de invoer. Behoud de '
-                        f'taal van de titel. Antwoord uitsluitend met JSON: '
-                        f'{{"auteur": "...", "titel": "..."}}.'
+                        f'Corrigeer ALLE spelfouten naar de juiste, gangbare schrijfwijze van de '
+                        f'auteursnaam (inclusief eigennamen en diakritische tekens zoals ø, é) en van '
+                        f'de boektitel, en bepaal welk deel de auteur is en welk de titel. Het blijft '
+                        f'hetzelfde boek — kies geen totaal ander boek, maar wees niet bang om duidelijke '
+                        f'typefouten te verbeteren. Behoud de taal van de titel. Antwoord uitsluitend met '
+                        f'JSON: {{"auteur": "...", "titel": "..."}}.'
                     ),
                 }],
             },
