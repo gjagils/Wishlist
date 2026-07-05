@@ -188,9 +188,11 @@ def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
     zodat een gehallucineerde suggestie nooit ongecontroleerd doorgaat.
     """
     if not ANTHROPIC_API_KEY:
+        print("   \u26A0\uFE0F AI-normalisatie overgeslagen: ANTHROPIC_API_KEY niet gezet in de container")
         return None
 
     try:
+        print(f"   \uD83E\uDD16 AI-normalisatie: vraag Claude om '{part_a} - {part_b}'...")
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -217,17 +219,21 @@ def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
         )
 
         if resp.status_code != 200:
-            print(f"   \u26A0\uFE0F AI-normalisatie mislukt: status={resp.status_code}")
+            print(f"   \u26A0\uFE0F AI-normalisatie mislukt: status={resp.status_code} body={resp.text[:200]}")
             return None
 
         text = resp.json()["content"][0]["text"]
         json_match = re.search(r'\{.*\}', text, re.DOTALL)
         if not json_match:
+            print(f"   \u26A0\uFE0F AI-normalisatie: geen JSON in antwoord: {text[:120]}")
             return None
 
         data = json.loads(json_match.group(0))
         if data.get("auteur") and data.get("titel"):
+            print(f"   \uD83E\uDD16 AI stelt voor: {data['auteur']} - \"{data['titel']}\"")
             return {"author": str(data["auteur"]), "title": str(data["titel"])}
+
+        print(f"   \uD83E\uDD16 AI herkende het boek niet")
 
     except Exception as e:
         print(f"   \u26A0\uFE0F AI-normalisatie mislukt: {e}")
