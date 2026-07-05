@@ -348,19 +348,20 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
 
                 fresh_item = db.get_wishlist_item(item_id)
 
-                already_exists = False
+                # Altijd een bevestiging dat de aanvraag ontvangen is...
                 try:
-                    already_exists = worker.check_item_in_calibre(fresh_item)
-                    if already_exists:
+                    email_sender.notify_item_requested(fresh_item)
+                except Exception as e:
+                    print(f"   ✗ Fout bij versturen bevestiging: {e}")
+
+                # ...en daarna meteen checken of het al in Calibre-Web staat.
+                # Zo ja: finalize_import (in check_item_in_calibre) stuurt er
+                # zelf nog een "beschikbaar"/"geshelved"-mail achteraan.
+                try:
+                    if worker.check_item_in_calibre(fresh_item):
                         print(f"   ✓ Stond al in Calibre-Web, direct afgerond")
                 except Exception as e:
                     print(f"   ✗ Fout bij Calibre-Web check: {e}")
-
-                if not already_exists:
-                    try:
-                        email_sender.notify_item_requested(fresh_item)
-                    except Exception as e:
-                        print(f"   ✗ Fout bij versturen bevestiging: {e}")
 
             except ValueError as e:
                 # Duplicaat
