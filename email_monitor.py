@@ -69,6 +69,17 @@ def decode_header_value(header_value: str) -> str:
     return ''.join(result)
 
 
+def _clean_text(text: str) -> str:
+    """
+    Verwijder lone surrogates en niet-encodeerbare tekens die uit de e-mail-
+    decoding kunnen komen — die breken anders bv. de JSON-body van de AI-call
+    ('surrogates not allowed').
+    """
+    if not text:
+        return text
+    return text.encode('utf-8', 'ignore').decode('utf-8', 'ignore')
+
+
 def _normalize_for_match(text: str) -> str:
     """Reduceer tot kale alfanumerieke tekens voor tolerante vergelijking."""
     return re.sub(r'[^a-z0-9]+', '', text.lower())
@@ -191,8 +202,10 @@ def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
         print("   \u26A0\uFE0F AI-normalisatie overgeslagen: ANTHROPIC_API_KEY niet gezet in de container")
         return None
 
+    part_a, part_b = _clean_text(part_a), _clean_text(part_b)
+
     try:
-        print(f"   \uD83E\uDD16 AI-normalisatie: vraag Claude om '{part_a} - {part_b}'...")
+        print(f"   [AI] AI-normalisatie: vraag Claude om '{part_a} - {part_b}'...")
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={
@@ -230,10 +243,10 @@ def _llm_normalize(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
 
         data = json.loads(json_match.group(0))
         if data.get("auteur") and data.get("titel"):
-            print(f"   \uD83E\uDD16 AI stelt voor: {data['auteur']} - \"{data['titel']}\"")
+            print(f"   [AI] AI stelt voor: {data['auteur']} - \"{data['titel']}\"")
             return {"author": str(data["auteur"]), "title": str(data["titel"])}
 
-        print(f"   \uD83E\uDD16 AI herkende het boek niet")
+        print(f"   [AI] AI herkende het boek niet")
 
     except Exception as e:
         print(f"   \u26A0\uFE0F AI-normalisatie mislukt: {e}")
@@ -412,8 +425,8 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
         from_header = decode_header_value(msg.get('From', ''))
         _, sender_email = parseaddr(from_header)
         sender_email = sender_email.lower()
-        subject = decode_header_value(msg.get('Subject', ''))
-        body = get_email_body(msg)
+        subject = _clean_text(decode_header_value(msg.get('Subject', '')))
+        body = _clean_text(get_email_body(msg))
 
         print(f"\n📧 Email van: {from_header}")
         print(f"   Subject: {subject}")
