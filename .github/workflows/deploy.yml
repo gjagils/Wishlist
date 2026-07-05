@@ -62,6 +62,13 @@ jobs:
           ENDPOINT_ID=$(echo "$STACK_INFO" | jq -r '.EndpointId')
           CURRENT_ENV=$(echo "$STACK_INFO" | jq '.Env // []')
 
+          # Zorg dat nieuwe env-opties bestaan in de stack (leeg) zodat ze in
+          # Portainer ingevuld kunnen worden. Bestaande waarden blijven staan.
+          for VAR in ANTHROPIC_API_KEY; do
+            CURRENT_ENV=$(echo "$CURRENT_ENV" | jq --arg n "$VAR" \
+              'if any(.[]; .name == $n) then . else . + [{"name": $n, "value": ""}] end')
+          done
+
           # Pull latest image op Synology
           IMAGE_LOWER=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
           curl -s -X POST \
