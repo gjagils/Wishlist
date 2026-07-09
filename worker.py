@@ -78,6 +78,33 @@ def candidate_matches(author: str, title: str, candidate_title: str) -> bool:
     return author_ok and title_ok
 
 
+# Waarden die Calibre-Web toont als er geen auteur is ingevuld
+GENERIC_FIELDS = {"", "unknown", "onbekend", "unknown author", "anoniem", "diversen"}
+
+
+def _is_generic(field: str) -> bool:
+    """True als het veld leeg is of een 'onbekend'-placeholder bevat."""
+    return _norm(field) in GENERIC_FIELDS
+
+
+def _title_tokens_present(want_title: str, field: str) -> bool:
+    """Alle betekenisvolle titelwoorden van want_title komen voor in field (sterke titel-match)."""
+    want = _tokens(want_title)
+    if not want:
+        return False
+    have = set(_tokens(field))
+    return all(t in have for t in want)
+
+
+def _author_tokens_present(want_author: str, field: str) -> bool:
+    """Minimaal 1 auteurwoord van want_author komt voor in field."""
+    want = _tokens(want_author)
+    if not want:
+        return True
+    have = set(_tokens(field))
+    return any(a in have for a in want)
+
+
 def search_variants(author: str, title: str) -> List[str]:
     """
     Maak zoek varianten voor betere Spotweb matches.
@@ -302,13 +329,14 @@ def finalize_import(item: dict, book_id: int) -> None:
 def match_recent_import(item: dict) -> Optional[int]:
     """
     Fallback voor als search_book() geen match vindt: kijk of het boek
-    tussen de meest recent toegevoegde boeken in Calibre-Web zit met een
-    titel/auteur die lijkt op (maar niet noodzakelijk exact overeenkomt met)
-    dit item — bv. omdat Calibre-Web de metadata net iets anders heeft
-    geparsed bij de import.
+    tussen de meest recent toegevoegde boeken in Calibre-Web zit, ook als de
+    metadata bij de import onvolledig/verkeerd is gezet. Herkent:
+      - juiste titel maar ontbrekende/'Unknown' auteur,
+      - titel en auteur die per ongeluk omgedraaid in de metadata staan.
 
-    Corrigeert bij een match ook meteen de titel/auteur in Calibre-Web naar
-    de canonieke waarden uit de wishlist.
+    De titelwoorden moeten wél echt voorkomen (sterke titel-match als anker);
+    de auteur wordt getolereerd als dat veld leeg/'Unknown' is. Bij een match
+    worden titel én auteur in Calibre-Web gecorrigeerd naar de wishlist-waarden.
 
     Returns: book_id als er een aannemelijke recente match is, anders None
     """
@@ -316,26 +344,40 @@ def match_recent_import(item: dict) -> Optional[int]:
     author = item['author']
     title = item['title']
 
-    recent_books = calibreweb.get_recent_books(limit=10)
+    recent_books = calibreweb.get_recent_books(limit=50)
 
     for book in recent_books:
-        candidate = f"{book['title']} {book['author']}"
-        if not candidate_matches(author, title, candidate):
+        c_title = book['title']
+        c_author = book['author']
+
+        # Normaal: titel in titelveld, auteur in auteurveld (of auteur onbekend)
+        normal = (_title_tokens_present(title, c_title) and
+                  (_author_tokens_present(author, c_author) or _is_generic(c_author)))
+        # Omgedraaid: titel in auteurveld, auteur in titelveld (of dat veld onbekend)
+        swapped = (_title_tokens_present(title, c_author) and
+                   (_author_tokens_present(author, c_title) or _is_generic(c_title)))
+
+        if not (normal or swapped):
             continue
 
         book_id = book['book_id']
+        orientation = "omgedraaid" if (swapped and not normal) else "normaal"
 
-        if book['title'].strip().lower() != title.strip().lower():
+        # Metadata corrigeren naar de canonieke wishlist-waarden
+        if _norm(c_title) != _norm(title):
             if not calibreweb.update_book_title(book_id, title):
                 db.add_log(item_id, "warning",
                            f"Metadata-titel bijwerken mislukt (book_id={book_id}), "
                            f"controleer Edit-rechten van de Calibre-Web integratie-account")
-        if book['author'].strip().lower() != author.strip().lower():
+        if _norm(c_author) != _norm(author):
             if not calibreweb.update_book_author(book_id, author):
                 db.add_log(item_id, "warning",
                            f"Metadata-auteur bijwerken mislukt (book_id={book_id}), "
                            f"controleer Edit-rechten van de Calibre-Web integratie-account")
 
+        db.add_log(item_id, "info",
+                   f"✓ Herkend tussen recente imports ({orientation}, book_id={book_id}); "
+                   f"metadata gecorrigeerd naar '{author} - {title}'")
         return book_id
 
     return None
@@ -424,10 +466,18 @@ def check_item_in_calibre(item: dict) -> bool:
 
     try:
         book_id = calibreweb.search_book(author, title)
+        via = "titel + auteur"
+
+        if not book_id:
+            # Fallback: herken het boek tussen recente imports, ook bij
+            # ontbrekende/'Unknown' of omgedraaide metadata (en corrigeer die).
+            book_id = match_recent_import(item)
+            via = "recente import"
+
         if not book_id:
             return False
 
-        db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre-Web (book_id={book_id})")
+        db.add_log(item_id, "info", f"✓ Boek bestond al in Calibre-Web (via {via}, book_id={book_id})")
         finalize_import(item, book_id)
         return True
 
