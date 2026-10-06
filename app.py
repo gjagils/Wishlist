@@ -226,6 +226,14 @@ def portal():
     return response
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """Browsers vragen /favicon.ico ook zonder <link>; serveer de W."""
+    response = send_from_directory('static', 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    response.headers['Cache-Control'] = 'public, max-age=86400'
+    return response
+
+
 @app.route('/static/<path:path>')
 def serve_static(path):
     """Serveer statische bestanden."""
