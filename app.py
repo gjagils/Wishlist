@@ -746,15 +746,36 @@ def _cover_proxy_url(item_id: int, cover_value: str) -> str:
     return f"/api/cover-image/{item_id}?v={version}"
 
 
+def _word_matches(word: str, have: set) -> bool:
+    """
+    Woord komt voor in 'have', exact of als variant met dezelfde stam
+    (consultant/consulting, eiland/eilanden). Alleen voor woorden van 5+
+    letters en alleen als hooguit de laatste 3 letters verschillen, zodat
+    korte woorden als 'kat'/'kater' niet ten onrechte matchen.
+    """
+    if word in have:
+        return True
+    if len(word) < 5:
+        return False
+    for h in have:
+        if len(h) < 5:
+            continue
+        common = len(os.path.commonprefix([word, h]))
+        if common >= 5 and common >= max(len(word), len(h)) - 3:
+            return True
+    return False
+
+
 def _cover_matches(author: str, title: str, candidate_text: str) -> bool:
     """
     Strenge controle of een zoekresultaat écht dit boek is:
-    alle betekenisvolle titelwoorden én minstens één auteurwoord moeten voorkomen.
+    alle betekenisvolle titelwoorden (of een variant met dezelfde stam) én
+    minstens één auteurwoord moeten voorkomen.
     """
     have = set(calibreweb._match_tokens(candidate_text))
     title_tokens = calibreweb._match_tokens(title)
     author_tokens = calibreweb._match_tokens(author)
-    if not title_tokens or not all(t in have for t in title_tokens):
+    if not title_tokens or not all(_word_matches(t, have) for t in title_tokens):
         return False
     if author_tokens and not any(a in have for a in author_tokens):
         return False
@@ -914,8 +935,11 @@ def _fetch_google_books_cover(author: str, title: str, rejected: list = None, st
     author_last = author_parts[-1] if author_parts else author
 
     queries = [
+        # Precies: titelwoorden in de titel, achternaam als auteur
         f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author_last)}",
-        f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author)}",
+        # Los: vindt ook licht afwijkende titels (Flawless Consultant → Consulting);
+        # _cover_matches bewaakt daarna of het echt hetzelfde boek is
+        urllib.parse.quote(f"{author} {title}"),
     ]
     key_param = f"&key={urllib.parse.quote(GOOGLE_BOOKS_API_KEY)}" if GOOGLE_BOOKS_API_KEY else ""
     key_label = "met sleutel" if GOOGLE_BOOKS_API_KEY else "ZONDER sleutel"
