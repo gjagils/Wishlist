@@ -226,6 +226,14 @@ def portal():
     return response
 
 
+@app.route('/favicon.ico')
+def favicon():
+    """Browsers vragen /favicon.ico ook zonder <link>; serveer de W."""
+    response = send_from_directory('static', 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    response.headers['Cache-Control'] = 'public, max-age=86400'
+    return response
+
+
 @app.route('/static/<path:path>')
 def serve_static(path):
     """Serveer statische bestanden."""
@@ -721,6 +729,7 @@ def api_update_status(item_id: int):
 GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY", "").strip()
 COVER_MISS_RETRY_HOURS = float(os.environ.get("COVER_MISS_RETRY_HOURS", "24"))
 COVER_TRANSIENT_RETRY_HOURS = 1.0
+print(f"[cover] Google Books API-sleutel: {'ingesteld' if GOOGLE_BOOKS_API_KEY else 'NIET ingesteld'}", flush=True)
 COVER_UA = 'Mozilla/5.0 (compatible; WishlistBot/1.0)'
 BROWSER_UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/125.0 Safari/537.36')
@@ -752,7 +761,23 @@ def _cover_matches(author: str, title: str, candidate_text: str) -> bool:
     return True
 
 
-def _find_cover(item: dict, rejected: list = None) -> tuple:
+def _note(status: dict, source: str, text: str) -> None:
+    """Leg vast wat een bron opleverde (voor logging en de admin-diagnose)."""
+    status.setdefault('notes', []).append(f"{source}: {text}")
+
+
+def _api_error_text(resp) -> str:
+    """Korte foutomschrijving uit een API-response, zonder de sleutel te lekken."""
+    try:
+        msg = resp.json().get('error', {}).get('message', '')
+    except Exception:
+        msg = ''
+    if GOOGLE_BOOKS_API_KEY:
+        msg = msg.replace(GOOGLE_BOOKS_API_KEY, '***')
+    return f"HTTP {resp.status_code}" + (f" ({msg[:160]})" if msg else "")
+
+
+def _find_cover(item: dict, rejected: list = None, status: dict = None) -> tuple:
     """
     Doorloop de bronnen in volgorde.
 
@@ -763,19 +788,33 @@ def _find_cover(item: dict, rejected: list = None) -> tuple:
     """
     rejected = rejected or []
     author, title = item['author'], item['title']
-    status = {'transient': False}
+    status = status if status is not None else {}
+    status.setdefault('transient', False)
+    status.setdefault('notes', [])
+
+    def done(value):
+        outcome = "gevonden" if value else ("tijdelijk niet gelukt" if status['transient'] else "niet gevonden")
+        print(f"[cover] item {item['id']} '{author} - {title}': {outcome} | " + " | ".join(status['notes']),
+              flush=True)
+        return value, (False if value else status['transient'])
 
     book_id = item.get('calibre_book_id')
-    if book_id and f"calibre:{book_id}" not in rejected:
-        if calibreweb.fetch_cover(book_id):
-            return f"calibre:{book_id}", False
+    if not book_id:
+        _note(status, "calibre", "geen gekoppeld boek")
+    elif f"calibre:{book_id}" in rejected:
+        _note(status, "calibre", "afgewezen")
+    elif calibreweb.fetch_cover(book_id):
+        _note(status, "calibre", f"cover van book_id={book_id}")
+        return done(f"calibre:{book_id}")
+    else:
+        _note(status, "calibre", f"geen cover voor book_id={book_id}")
 
     for fetcher in (_fetch_google_books_cover, _fetch_openlibrary_cover):
         url = fetcher(author, title, rejected, status)
         if url:
-            return url, False
+            return done(url)
 
-    return None, status['transient']
+    return done(None)
 
 
 def _parse_miss(cached: str):
@@ -879,25 +918,32 @@ def _fetch_google_books_cover(author: str, title: str, rejected: list = None, st
         f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author)}",
     ]
     key_param = f"&key={urllib.parse.quote(GOOGLE_BOOKS_API_KEY)}" if GOOGLE_BOOKS_API_KEY else ""
+    key_label = "met sleutel" if GOOGLE_BOOKS_API_KEY else "ZONDER sleutel"
+    seen = with_image = 0
 
     for query in queries:
         try:
-            url = (f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=10"
+            # country=NL: zonder land weigert de API soms ("cannot determine user location")
+            url = (f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=10&country=NL"
                    f"&fields=items(volumeInfo){key_param}")
             resp = req.get(url, timeout=8)
             if resp.status_code == 429 or resp.status_code >= 500:
                 status['transient'] = True  # quota op / storing: niet lang als 'niet gevonden' cachen
+                _note(status, "google", f"{key_label}, {_api_error_text(resp)}")
                 return None
             if resp.status_code != 200:
-                continue
+                _note(status, "google", f"{key_label}, {_api_error_text(resp)}")
+                return None  # 400/403: sleutel of verzoek ongeldig, tweede query helpt niet
 
             data = resp.json()
+            seen += len(data.get("items", []))
             for item in data.get("items", []):
                 vol = item.get("volumeInfo", {})
                 links = vol.get("imageLinks", {})
                 cover = links.get("thumbnail") or links.get("smallThumbnail")
                 if not cover:
                     continue
+                with_image += 1
 
                 candidate = f"{vol.get('title', '')} {vol.get('subtitle', '')} {' '.join(vol.get('authors', []))}"
                 if not _cover_matches(author, title, candidate):
@@ -908,12 +954,15 @@ def _fetch_google_books_cover(author: str, title: str, rejected: list = None, st
                 cover = cover.replace("zoom=1", "zoom=2")
                 if cover in rejected:
                     continue
+                _note(status, "google", f"{key_label}, match: {vol.get('title')} / {vol.get('authors')}")
                 return cover
 
-        except Exception:
+        except Exception as e:
             status['transient'] = True
+            _note(status, "google", f"{key_label}, fout: {type(e).__name__}")
             continue
 
+    _note(status, "google", f"{key_label}, {seen} resultaten, {with_image} met afbeelding, geen match")
     return None
 
 
@@ -935,6 +984,7 @@ def _fetch_openlibrary_cover(author: str, title: str, rejected: list = None, sta
         f"title={urllib.parse.quote(title)}&author={urllib.parse.quote(author)}",
         f"q={urllib.parse.quote(author + ' ' + title)}",
     ]
+    ol_seen = 0
 
     for query in queries:
         try:
@@ -942,11 +992,14 @@ def _fetch_openlibrary_cover(author: str, title: str, rejected: list = None, sta
             resp = req.get(url, timeout=8, headers={'User-Agent': COVER_UA})
             if resp.status_code == 429 or resp.status_code >= 500:
                 status['transient'] = True
+                _note(status, "openlibrary", f"HTTP {resp.status_code}")
                 return None
             if resp.status_code != 200:
                 continue
 
-            for doc in resp.json().get("docs", []):
+            docs = resp.json().get("docs", [])
+            ol_seen += len(docs)
+            for doc in docs:
                 cover_id = doc.get("cover_i")
                 if not cover_id:
                     continue
@@ -956,12 +1009,15 @@ def _fetch_openlibrary_cover(author: str, title: str, rejected: list = None, sta
                 cover_url = f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
                 if cover_url in rejected:
                     continue
+                _note(status, "openlibrary", f"match: {doc.get('title')} / {doc.get('author_name')}")
                 return cover_url
 
-        except Exception:
+        except Exception as e:
             status['transient'] = True
+            _note(status, "openlibrary", f"fout: {type(e).__name__}")
             continue
 
+    _note(status, "openlibrary", f"{ol_seen} resultaten, geen match")
     return None
 
 
@@ -1189,6 +1245,27 @@ def api_admin_reset_covers():
     """Zoek alle covers opnieuw. 'Geen cover'-keuzes en afgewezen covers blijven staan."""
     count = db.reset_cover_cache()
     return jsonify({'message': f'{count} cover(s) worden opnieuw gezocht'})
+
+
+@app.route('/api/admin/cover-debug/<int:item_id>', methods=['GET'])
+@requires_auth
+@requires_admin
+def api_admin_cover_debug(item_id: int):
+    """Laat per bron zien wat de cover-zoektocht oplevert, zonder iets te cachen."""
+    item = db.get_wishlist_item(item_id)
+    if not item:
+        return jsonify({'error': 'Item niet gevonden'}), 404
+    status = {}
+    cover_value, transient = _find_cover(item, [], status)
+    return jsonify({
+        'item': {'id': item_id, 'author': item['author'], 'title': item['title'],
+                 'calibre_book_id': item.get('calibre_book_id')},
+        'google_books_key_configured': bool(GOOGLE_BOOKS_API_KEY),
+        'cached': db.get_setting(f"cover_{item_id}"),
+        'result': cover_value,
+        'transient': transient,
+        'notes': status.get('notes', []),
+    })
 
 
 @app.route('/api/health', methods=['GET'])
