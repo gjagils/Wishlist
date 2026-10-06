@@ -741,9 +741,11 @@ def api_update_status(item_id: int):
 #   1. Calibre-Web   — exacte cover zodra het boek geïmporteerd is
 #   2. Apple Books   — iTunes Search API, Nederlandse e-bookwinkel, geen sleutel nodig;
 #                      beste dekking van recente Nederlandse titels
-#   3. Google Books  — met eigen API-sleutel (GOOGLE_BOOKS_API_KEY); zonder
+#   3. A.W. Bruna    — zoekpagina van de uitgeverij (Grisham, Pulixi, Lapidus, ...);
+#                      heeft nieuwe titels al vóór de e-bookwinkels
+#   4. Google Books  — met eigen API-sleutel (GOOGLE_BOOKS_API_KEY); zonder
 #                      sleutel is het gedeelde anonieme quotum vrijwel altijd op (HTTP 429)
-#   4. Open Library  — alleen met strenge auteur+titel controle (kent weinig NL vertalingen)
+#   5. Open Library  — alleen met strenge auteur+titel controle (kent weinig NL vertalingen)
 #
 # Cache (settings-tabel, key cover_<id>):
 #   "<url>"            gevonden cover (externe URL of "calibre:<book_id>")
@@ -855,7 +857,7 @@ def _find_cover(item: dict, rejected: list = None, status: dict = None) -> tuple
     else:
         _note(status, "calibre", f"geen cover voor book_id={book_id}")
 
-    for fetcher in (_fetch_apple_books_cover, _fetch_google_books_cover, _fetch_openlibrary_cover):
+    for fetcher in (_fetch_apple_books_cover, _fetch_awbruna_cover, _fetch_google_books_cover, _fetch_openlibrary_cover):
         url = fetcher(author, title, rejected, status)
         if url:
             return done(url)
@@ -996,6 +998,56 @@ def _fetch_apple_books_cover(author: str, title: str, rejected: list = None, sta
     return None
 
 
+def _fetch_awbruna_cover(author: str, title: str, rejected: list = None, status: dict = None) -> str | None:
+    """
+    Zoek boekcover op de site van uitgeverij A.W. Bruna (awbruna.nl).
+
+    De uitgeverij zet nieuwe Nederlandse vertalingen online zodra ze aangekondigd
+    zijn, vaak voordat Apple of Google ze hebben. Elk zoekresultaat is een
+    <article class="card card-book" data-ean=...> met alt="Titel - Auteur" en een
+    thumbnail van 200px breed; dezelfde afbeelding bestaat ook op 364px.
+    """
+    import requests as req
+    import html as html_lib
+    import urllib.parse
+
+    rejected = rejected or []
+    status = status if status is not None else {}
+
+    try:
+        resp = req.get(f"https://www.awbruna.nl/boeken/?q={urllib.parse.quote(f'{author} {title}')}",
+                       timeout=10, headers={'User-Agent': COVER_UA, 'Accept-Language': 'nl-NL,nl;q=0.9'})
+    except Exception as e:
+        status['transient'] = True
+        _note(status, "awbruna", f"fout: {type(e).__name__}")
+        return None
+    if resp.status_code in (403, 429) or resp.status_code >= 500:
+        status['transient'] = True
+        _note(status, "awbruna", f"HTTP {resp.status_code}")
+        return None
+    if resp.status_code != 200:
+        _note(status, "awbruna", f"HTTP {resp.status_code}")
+        return None
+
+    cards = re.findall(r'<article class="card card-book[^"]*"[^>]*>(.*?)</article>', resp.text, re.S)
+    for card in cards:
+        alt = re.search(r'<a [^>]*alt="([^"]+)"', card)
+        img = re.search(r'<img [^>]*src="([^"]+)"', card)
+        if not alt or not img:
+            continue
+        label = html_lib.unescape(alt.group(1))  # "Titel - Auteur"
+        if not _cover_matches(author, title, label):
+            continue
+        cover = html_lib.unescape(img.group(1)).replace('-200x0-c-default.', '-364x0-c-default.')
+        if cover in rejected:
+            continue
+        _note(status, "awbruna", f"match: {label}")
+        return cover
+
+    _note(status, "awbruna", f"{len(cards)} resultaten, geen match")
+    return None
+
+
 def _fetch_google_books_cover(author: str, title: str, rejected: list = None, status: dict = None) -> str | None:
     """Zoek boekcover via Google Books API met auteur+titel validatie."""
     import requests as req
@@ -1024,10 +1076,16 @@ def _fetch_google_books_cover(author: str, title: str, rejected: list = None, st
             url = (f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=10&country=NL"
                    f"&fields=items(volumeInfo){key_param}")
             resp = req.get(url, timeout=8)
-            if resp.status_code == 429 or resp.status_code >= 500:
-                status['transient'] = True  # quota op / storing: niet lang als 'niet gevonden' cachen
+            if resp.status_code == 429:
+                status['transient'] = True  # quota op: niet lang als 'niet gevonden' cachen
                 _note(status, "google", f"{key_label}, {_api_error_text(resp)}")
                 return None
+            if resp.status_code >= 500:
+                # Google Books geeft regelmatig een losse 503 op één zoekopdracht;
+                # de volgende zoekopdracht lukt dan vaak wel.
+                status['transient'] = True
+                _note(status, "google", f"{key_label}, {_api_error_text(resp)}")
+                continue
             if resp.status_code != 200:
                 _note(status, "google", f"{key_label}, {_api_error_text(resp)}")
                 return None  # 400/403: sleutel of verzoek ongeldig, tweede query helpt niet
