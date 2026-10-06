@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(() => {
         loadWishlist();
         loadLogs();
+        if (currentUser && currentUser.role === 'admin') loadMailCheckStatus();
     }, 30000);
 });
 
@@ -38,6 +39,7 @@ async function loadCurrentUser() {
             const logsCard = document.getElementById('logs-card');
             if (logsCard) logsCard.style.display = '';
             loadUsersForAdmin();
+            loadMailCheckStatus();
         }
     } catch (error) {
         console.error('Error loading user:', error);
@@ -528,6 +530,84 @@ function applyCover(el, url) {
         if (placeholder) placeholder.style.display = 'none';
     };
     img.src = url;
+}
+
+// ===== MAILCHECK (alleen admin) =====
+let mailCheckPoll = null;
+
+function describeMailCheck(state) {
+    if (!state.configured) return { text: 'E-mail niet geconfigureerd', error: true };
+    if (state.pending) return { text: 'Check aangevraagd, wacht op mailmonitor...', error: false };
+    const last = state.last_check;
+    if (!last) return { text: 'Nog geen check uitgevoerd', error: false };
+    const when = formatDateTime(last.at);
+    if (last.error) return { text: `Laatste check ${when} mislukt: ${last.error}`, error: true };
+    const how = last.trigger === 'handmatig' ? 'handmatig' : 'automatisch';
+    const found = last.found === 1 ? '1 nieuwe mail' : `${last.found} nieuwe mails`;
+    return { text: `Laatste check ${when} (${how}): ${found}`, error: false };
+}
+
+function showMailCheckState(state) {
+    const el = document.getElementById('mail-check-status');
+    const btn = document.getElementById('mail-check-btn');
+    if (!el || !btn) return;
+    const d = describeMailCheck(state);
+    el.textContent = d.text;
+    el.classList.toggle('error', d.error);
+    btn.disabled = !state.configured || state.pending;
+}
+
+async function loadMailCheckStatus() {
+    try {
+        const resp = await fetch('/api/admin/email-check');
+        if (!resp.ok) return null;
+        const state = await resp.json();
+        showMailCheckState(state);
+        return state;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function requestMailCheck() {
+    const el = document.getElementById('mail-check-status');
+    const btn = document.getElementById('mail-check-btn');
+    btn.disabled = true;
+    try {
+        const resp = await fetch('/api/admin/email-check', { method: 'POST' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+            el.textContent = data.error || 'Aanvragen mislukt';
+            el.classList.add('error');
+            btn.disabled = false;
+            return;
+        }
+        showMailCheckState(data);
+        const requestedAt = (data.last_check || {}).at || null;
+
+        // Wacht tot de monitor de check gedraaid heeft (max ~60s), ververs dan de lijst
+        clearInterval(mailCheckPoll);
+        let tries = 0;
+        mailCheckPoll = setInterval(async () => {
+            tries++;
+            const state = await loadMailCheckStatus();
+            const done = state && !state.pending && (state.last_check || {}).at !== requestedAt;
+            if (done || tries >= 30) {
+                clearInterval(mailCheckPoll);
+                if (!done && state) {
+                    el.textContent = 'Mailmonitor reageert niet, draait de container nog?';
+                    el.classList.add('error');
+                    btn.disabled = false;
+                }
+                loadWishlist();
+                loadLogs();
+            }
+        }, 2000);
+    } catch (e) {
+        el.textContent = 'Netwerkfout';
+        el.classList.add('error');
+        btn.disabled = false;
+    }
 }
 
 function renderLogs(logs) {

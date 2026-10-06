@@ -16,6 +16,7 @@ import email
 import json
 import urllib.parse
 import difflib
+from datetime import datetime
 from email.header import decode_header
 from email.utils import parseaddr
 import re
@@ -35,6 +36,13 @@ CHECK_INTERVAL = int(os.environ.get('EMAIL_CHECK_INTERVAL', '300'))  # 5 minuten
 ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
 
 # Mailbox settings
+GOOGLE_BOOKS_API_KEY = os.environ.get('GOOGLE_BOOKS_API_KEY', '').strip()
+
+# Handmatige check vanaf de website: de webapp zet 'email_check_requested'
+# in de settings-tabel; deze monitor kijkt elke POLL seconden of dat zo is.
+# Zo praat alleen dit proces met de mailserver, ook bij een knop-druk.
+REQUEST_POLL_SECONDS = 10
+
 INBOX_FOLDER = os.environ.get('EMAIL_INBOX_FOLDER', 'INBOX')
 PROCESSED_FOLDER = os.environ.get('EMAIL_PROCESSED_FOLDER', 'Archive')
 
@@ -137,11 +145,13 @@ def _google_books_lookup(part_a: str, part_b: str) -> Optional[Dict[str, str]]:
     Zoek op Google Books naar een boek dat overeenkomt met part_a/part_b
     (in beide volgordes). Geeft de canonieke titel en auteur terug (met
     correcte spelling) bij een overtuigende match, anders None. Geen API key
-    nodig (zelfde aanpak als de cover-lookup).
+    nodig, maar zonder GOOGLE_BOOKS_API_KEY is het gedeelde quotum vrijwel altijd op.
     """
+    key_param = f"&key={urllib.parse.quote(GOOGLE_BOOKS_API_KEY)}" if GOOGLE_BOOKS_API_KEY else ""
     for q in _search_queries(part_a, part_b):
         try:
-            url = f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(q)}&maxResults=5&fields=items(volumeInfo(title,authors))"
+            url = (f"https://www.googleapis.com/books/v1/volumes?q={urllib.parse.quote(q)}&maxResults=5"
+                   f"&country=NL&fields=items(volumeInfo(title,authors)){key_param}")
             resp = requests.get(url, timeout=8)
             if resp.status_code != 200:
                 continue
@@ -503,13 +513,19 @@ def process_email(mail: imaplib.IMAP4_SSL, email_id: bytes) -> int:
     return added_count
 
 
+_last_check = {'found': 0, 'error': None}
+
+
 def check_mailbox() -> int:
     """
     Check Gmail IMAP mailbox voor nieuwe wishlist emails.
     Returns: aantal verwerkte emails
     """
+    _last_check.update(found=0, error=None)
+
     if not EMAIL_ADDRESS or not EMAIL_PASSWORD:
         print("⚠️ EMAIL_ADDRESS of EMAIL_PASSWORD niet ingesteld")
+        _last_check['error'] = "EMAIL_ADDRESS of EMAIL_PASSWORD niet ingesteld"
         return 0
 
     processed_count = 0
@@ -539,6 +555,7 @@ def check_mailbox() -> int:
             return 0
 
         email_ids = messages[0].split()
+        _last_check['found'] = len(email_ids)
         print(f"📨 {len(email_ids)} ongelezen email(s) gevonden")
 
         if not email_ids:
@@ -578,8 +595,10 @@ def check_mailbox() -> int:
     except imaplib.IMAP4.error as e:
         print(f"❌ IMAP fout: {e}")
         print("   Check of IMAP enabled is en App Password gebruikt wordt")
+        _last_check['error'] = f"IMAP fout: {e}"
     except Exception as e:
         print(f"❌ Fout bij checken mailbox: {e}")
+        _last_check['error'] = f"Fout bij checken mailbox: {e}"
 
     return processed_count
 
@@ -597,16 +616,55 @@ def main():
     else:
         print("   ⚠️ Geen sender whitelist - alle emails worden geaccepteerd")
 
+    trigger = "start"
     while True:
         try:
             processed = check_mailbox()
             if processed > 0:
                 print(f"✓ {processed} email(s) verwerkt\n")
         except Exception as e:
+            processed = 0
+            _last_check['error'] = f"Fout in main loop: {e}"
             print(f"❌ Fout in main loop: {e}")
 
-        print(f"Volgende check over {CHECK_INTERVAL}s...")
-        time.sleep(CHECK_INTERVAL)
+        _record_check(trigger, processed)
+
+        print(f"Volgende check over {CHECK_INTERVAL}s (of eerder via de knop op de website)...")
+        trigger = _wait_for_next_check()
+
+
+def _record_check(trigger: str, processed: int) -> None:
+    """Sla het resultaat van de laatste check op, zodat de website het kan tonen."""
+    try:
+        db.set_setting('email_last_check', json.dumps({
+            'at': datetime.now().isoformat(timespec='seconds'),
+            'trigger': trigger,
+            'found': _last_check['found'],
+            'processed': processed,
+            'error': _last_check['error'],
+        }))
+    except Exception as e:
+        print(f"⚠️ Kon check-resultaat niet opslaan: {e}")
+
+
+def _wait_for_next_check() -> str:
+    """
+    Wacht tot het volgende interval, of tot iemand op de website een check
+    aanvraagt. Returns: 'interval' of 'handmatig'.
+    """
+    deadline = time.monotonic() + CHECK_INTERVAL
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "interval"
+        time.sleep(min(REQUEST_POLL_SECONDS, remaining))
+        try:
+            if db.get_setting('email_check_requested'):
+                db.set_setting('email_check_requested', '')
+                print("🔔 Handmatige check aangevraagd via de website")
+                return "handmatig"
+        except Exception as e:
+            print(f"⚠️ Kon check-verzoek niet lezen: {e}")
 
 
 if __name__ == '__main__':

@@ -1213,6 +1213,57 @@ def api_admin_update_email_templates():
     return jsonify({'message': 'E-mail templates opgeslagen'})
 
 
+EMAIL_CHECK_MIN_SECONDS = 15  # minimale tijd tussen twee handmatige checks
+
+
+def _email_check_state() -> dict:
+    """Huidige status van de e-mailmonitor voor de website."""
+    try:
+        last = json.loads(db.get_setting('email_last_check') or 'null')
+    except ValueError:
+        last = None
+    return {
+        'configured': bool(os.environ.get('EMAIL_ADDRESS') and os.environ.get('EMAIL_PASSWORD')),
+        'interval_seconds': int(os.environ.get('EMAIL_CHECK_INTERVAL', '300')),
+        'pending': bool(db.get_setting('email_check_requested')),
+        'last_check': last,
+    }
+
+
+@app.route('/api/admin/email-check', methods=['GET'])
+@requires_auth
+@requires_admin
+def api_admin_email_check_status():
+    """Wanneer was de laatste mailcheck, en staat er een handmatige check klaar?"""
+    return jsonify(_email_check_state())
+
+
+@app.route('/api/admin/email-check', methods=['POST'])
+@requires_auth
+@requires_admin
+def api_admin_email_check_request():
+    """
+    Vraag een mailcheck aan. De e-mailmonitor (apart proces) pakt dit binnen
+    ~10 seconden op, zodat er nooit twee processen tegelijk met de mailserver praten.
+    """
+    state = _email_check_state()
+    if not state['configured']:
+        return jsonify({**state, 'error': 'E-mail is niet geconfigureerd'}), 400
+
+    last_at = (state['last_check'] or {}).get('at')
+    if last_at:
+        try:
+            age = (datetime.now() - datetime.fromisoformat(last_at)).total_seconds()
+            if 0 <= age < EMAIL_CHECK_MIN_SECONDS:
+                wait = int(EMAIL_CHECK_MIN_SECONDS - age) + 1
+                return jsonify({**state, 'error': f'Net gecheckt, probeer over {wait}s opnieuw'}), 429
+        except ValueError:
+            pass
+
+    db.set_setting('email_check_requested', datetime.now().isoformat(timespec='seconds'))
+    return jsonify({**_email_check_state(), 'message': 'Mailcheck aangevraagd'}), 202
+
+
 @app.route('/api/admin/email-settings', methods=['GET'])
 @requires_auth
 @requires_admin
