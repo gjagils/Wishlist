@@ -310,6 +310,20 @@ def _normalize(text: str) -> str:
     return "".join(c for c in text if unicodedata.category(c) != "Mn")
 
 
+# Stopwoorden die geen onderscheidende waarde hebben bij titel/auteur-matching
+_STOPWORDS = {
+    "de", "het", "een", "van", "en", "der", "den", "te", "in", "op", "voor", "met", "aan", "bij", "uit",
+    "the", "a", "an", "of", "and", "to", "on", "for", "with",
+}
+
+
+def _match_tokens(text: str) -> List[str]:
+    """Betekenisvolle woorden (genormaliseerd, zonder stopwoorden en leestekens)."""
+    norm = _normalize(text or "")
+    norm = re.sub(r"[^\w\s]", " ", norm)  # leestekens weg, letters (ook ð/ø/ß) blijven
+    return [w for w in norm.split() if len(w) > 1 and w not in _STOPWORDS]
+
+
 def _parse_opds_entry(entry, ns: dict) -> tuple:
     """Haal (book_id, titel, auteur) uit een OPDS atom:entry. book_id is None als niet te vinden."""
     entry_title_el = entry.find("atom:title", ns)
@@ -373,6 +387,28 @@ def get_recent_books(limit: int = 10) -> List[Dict]:
     return books
 
 
+def fetch_cover(book_id: int) -> Optional[tuple]:
+    """
+    Haal de cover van een boek op uit Calibre-Web (OPDS, basic auth).
+
+    Returns: (bytes, content_type) of None als er geen cover is / fout.
+    """
+    if not is_configured():
+        return None
+    try:
+        resp = requests.get(
+            f"{CALIBREWEB_URL}/opds/cover/{book_id}",
+            auth=(CALIBREWEB_USERNAME, CALIBREWEB_PASSWORD),
+            timeout=15,
+        )
+    except requests.RequestException:
+        return None
+    content_type = resp.headers.get("Content-Type", "")
+    if resp.status_code != 200 or not content_type.startswith("image/") or not resp.content:
+        return None
+    return resp.content, content_type
+
+
 def search_book(author: str, title: str) -> Optional[int]:
     """
     Zoek een boek in Calibre-Web via de OPDS feed.
@@ -402,9 +438,13 @@ def search_book(author: str, title: str) -> Optional[int]:
     if not entries:
         return None
 
-    # Match entries tegen auteur en titel
-    author_parts = [p.strip() for p in _normalize(author).split() if len(p.strip()) > 2]
-    title_parts = [p.strip() for p in _normalize(title).split() if len(p.strip()) > 2]
+    # Match entries tegen auteur en titel.
+    # Auteur: minimaal één naamdeel moet voorkomen (voornaam/achternaam).
+    # Titel: ÁLLE betekenisvolle titelwoorden (zonder stopwoorden) moeten
+    # voorkomen. Een losse 'any' op titelwoorden matchte "Boekhandel van de
+    # zwarte katten" op "Eiland van de zielen" van dezelfde auteur via "van".
+    author_parts = _match_tokens(author)
+    title_parts = _match_tokens(title)
 
     ns = {"atom": "http://www.w3.org/2005/Atom"}
 
@@ -415,9 +455,9 @@ def search_book(author: str, title: str) -> Optional[int]:
             continue
 
         # Match check (accent-insensitive)
-        combined = _normalize(f"{entry_title} {entry_author}")
-        author_ok = any(part in combined for part in author_parts) if author_parts else True
-        title_ok = any(part in combined for part in title_parts) if title_parts else True
+        combined_tokens = set(_match_tokens(f"{entry_title} {entry_author}"))
+        author_ok = any(part in combined_tokens for part in author_parts) if author_parts else True
+        title_ok = all(part in combined_tokens for part in title_parts) if title_parts else True
 
         if author_ok and title_ok:
             return book_id
