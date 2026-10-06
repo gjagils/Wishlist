@@ -290,6 +290,12 @@ def api_get_wishlist():
         'stuck': len([i for i in all_items if i['status'] == 'stuck']),
     }
 
+    flags = db.get_cover_flags()
+    for it in items:
+        f = flags.get(it['id'], {})
+        it['cover_locked'] = f.get('locked', False)
+        it['cover_skip'] = f.get('skip', False)
+
     return jsonify({
         'items': items,
         'stats': stats
@@ -449,12 +455,24 @@ def api_update_wishlist(item_id: int):
         db.update_wishlist_item(item_id, author=author, title=title, shelf_name=shelf_name)
 
         # Cover logica
+        cover_key = f"cover_{item_id}"
+        lock_key = f"coverlock_{item_id}"
+        cover_locked = data.get('cover_locked')
         if no_cover:
-            db.set_setting(f"cover_{item_id}", "skip")
+            db.set_setting(cover_key, "skip")
+            db.set_setting(lock_key, "")
         elif title_changed:
-            # Auteur/titel gewijzigd: opnieuw zoeken
-            db.set_setting(f"cover_{item_id}", "")
+            # Auteur/titel gewijzigd: opnieuw zoeken, vastzetten vervalt
+            db.set_setting(cover_key, "")
             db.set_setting(f"cover_rejected_{item_id}", "")  # Reset rejected lijst
+            db.set_setting(lock_key, "")
+        else:
+            current = db.get_setting(cover_key)
+            if current == "skip":
+                db.set_setting(cover_key, "")  # 'Geen cover' uitgevinkt: weer zoeken
+            elif cover_locked is not None:
+                # Alleen een echte, gevonden cover kan als 'klopt' worden vastgezet
+                db.set_setting(lock_key, "1" if (cover_locked and _is_real_cover(current)) else "")
 
         updated_item = db.get_wishlist_item(item_id)
         return jsonify({'message': 'Item bijgewerkt', 'item': updated_item})
@@ -475,10 +493,11 @@ def api_refresh_cover(item_id: int):
     if user['role'] != 'admin' and item.get('user_id') != user['id']:
         return jsonify({'error': 'Geen toegang'}), 403
 
-    # Huidige cover onthouden als "rejected"
+    # Huidige cover onthouden als "rejected"; een vastgezette cover is dan blijkbaar toch niet goed
     cache_key = f"cover_{item_id}"
     rejected_key = f"cover_rejected_{item_id}"
     current = db.get_setting(cache_key) or ''
+    db.set_setting(f"coverlock_{item_id}", "")
 
     rejected_raw = db.get_setting(rejected_key)
     rejected = json.loads(rejected_raw) if rejected_raw else []

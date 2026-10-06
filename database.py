@@ -485,17 +485,45 @@ def delete_settings_by_prefix(prefix: str) -> int:
 def reset_cover_cache() -> int:
     """
     Wis gevonden en niet-gevonden covers zodat ze opnieuw gezocht worden.
-    Laat bewuste keuzes van gebruikers staan: 'skip' (geen cover) en de
-    lijsten met afgewezen covers (cover_rejected_*).
+    Laat bewuste keuzes van gebruikers staan: 'skip' (geen cover), de
+    lijsten met afgewezen covers (cover_rejected_*) en covers die als
+    'klopt' zijn vastgezet (coverlock_<id> = '1').
     """
     with get_db() as conn:
         cursor = conn.execute(
             """DELETE FROM settings
                WHERE key LIKE 'cover!_%' ESCAPE '!'
                  AND key NOT LIKE 'cover!_rejected!_%' ESCAPE '!'
-                 AND COALESCE(value, '') != 'skip'"""
+                 AND COALESCE(value, '') != 'skip'
+                 AND NOT EXISTS (
+                     SELECT 1 FROM settings lock
+                     WHERE lock.key = 'coverlock_' || substr(settings.key, 7)
+                       AND lock.value = '1'
+                 )"""
         )
         return cursor.rowcount
+
+
+def get_cover_flags() -> Dict[int, Dict[str, bool]]:
+    """Per item-id: is de cover vastgezet ('locked') en/of uitgezet ('skip')?"""
+    flags: Dict[int, Dict[str, bool]] = {}
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT key, value FROM settings
+               WHERE (key LIKE 'coverlock!_%' ESCAPE '!' AND value = '1')
+                  OR (key LIKE 'cover!_%' ESCAPE '!' AND value = 'skip')"""
+        ).fetchall()
+    for row in rows:
+        key = row['key']
+        prefix, _, item_id = key.rpartition('_')
+        if not item_id.isdigit():
+            continue
+        entry = flags.setdefault(int(item_id), {'locked': False, 'skip': False})
+        if prefix == 'coverlock':
+            entry['locked'] = True
+        elif prefix == 'cover':
+            entry['skip'] = True
+    return flags
 
 
 def set_setting(key: str, value: str) -> None:

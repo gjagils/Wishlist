@@ -147,7 +147,10 @@ async function loadWishlist() {
         if (response.status === 401) { window.location.href = '/login'; return; }
         if (!response.ok) throw new Error('Laden mislukt');
 
-        wishlistData = await response.json();
+        const text = await response.text();
+        if (text === lastWishlistJson) return;  // niets veranderd: niet opnieuw tekenen (voorkomt knipperende covers)
+        lastWishlistJson = text;
+        wishlistData = JSON.parse(text);
         updateStats(wishlistData.stats);
         renderWishlist();
     } catch (error) {
@@ -489,6 +492,8 @@ function renderWishlist() {
 
 // ===== COVER LOADING =====
 const coverCache = new Map();
+const loadedCoverUrls = new Set();  // al eens geladen: direct tonen, zonder fade-in
+let lastWishlistJson = null;
 
 function loadCovers() {
     const coverEls = document.querySelectorAll('.book-cover[data-item-id]');
@@ -519,8 +524,7 @@ function loadCovers() {
 }
 
 function applyCover(el, url) {
-    const img = new Image();
-    img.onload = () => {
+    const show = () => {
         el.style.backgroundImage = `url('${url}')`;
         el.style.backgroundSize = 'contain';
         el.style.backgroundPosition = 'center';
@@ -529,6 +533,12 @@ function applyCover(el, url) {
         const placeholder = el.querySelector('.book-cover-placeholder');
         if (placeholder) placeholder.style.display = 'none';
     };
+    if (loadedCoverUrls.has(url)) {
+        show();  // staat al in de browsercache: meteen tonen
+        return;
+    }
+    const img = new Image();
+    img.onload = () => { loadedCoverUrls.add(url); show(); };
     img.src = url;
 }
 
@@ -653,7 +663,16 @@ function openEditModal(itemId) {
         }
     }
 
-    document.getElementById('edit-no-cover').checked = false;
+    const hasCover = !!coverCache.get(String(itemId));
+    const lockBox = document.getElementById('edit-cover-locked');
+    const noCoverBox = document.getElementById('edit-no-cover');
+    noCoverBox.checked = !!item.cover_skip;
+    lockBox.checked = !!item.cover_locked;
+    lockBox.disabled = !hasCover && !item.cover_locked;
+    lockBox.closest('label').style.opacity = lockBox.disabled ? '0.5' : '';
+    // Elkaar uitsluitend: een cover kan niet tegelijk 'klopt' en 'geen cover' zijn
+    lockBox.onchange = () => { if (lockBox.checked) noCoverBox.checked = false; };
+    noCoverBox.onchange = () => { if (noCoverBox.checked) lockBox.checked = false; };
 
     document.getElementById('edit-message').className = 'toast-message';
     document.getElementById('edit-modal').style.display = '';
@@ -674,6 +693,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const title = document.getElementById('edit-title').value.trim();
         const shelfName = document.getElementById('edit-shelf').value;
         const noCover = document.getElementById('edit-no-cover').checked;
+        const coverLocked = document.getElementById('edit-cover-locked').checked;
         const messageEl = document.getElementById('edit-message');
 
         if (!author || !title) {
@@ -685,14 +705,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`/api/wishlist/${itemId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ author, title, shelf_name: shelfName, no_cover: noCover }),
+                body: JSON.stringify({ author, title, shelf_name: shelfName, no_cover: noCover, cover_locked: coverLocked }),
             });
 
             const data = await response.json();
 
             if (response.ok) {
-                // Verwijder cover uit cache zodat nieuwe cover gezocht wordt
-                coverCache.delete(itemId);
+                // Verwijder cover uit cache zodat de (eventueel nieuwe) cover opnieuw opgehaald wordt
+                coverCache.delete(String(itemId));
+                lastWishlistJson = null;  // forceer opnieuw tekenen
                 closeEditModal();
                 loadWishlist();
                 loadLogs();
@@ -720,10 +741,14 @@ async function searchNewCover() {
         const data = await response.json();
 
         coverCache.delete(String(editingItemId));
+        lastWishlistJson = null;
 
         if (data.cover_url) {
             showMessage(msg, 'Nieuwe cover gevonden!', 'success');
             document.getElementById('edit-no-cover').checked = false;
+            document.getElementById('edit-cover-locked').checked = false;
+            document.getElementById('edit-cover-locked').disabled = false;
+            document.getElementById('edit-cover-locked').closest('label').style.opacity = '';
         } else {
             showMessage(msg, 'Geen andere cover gevonden', 'error');
         }
