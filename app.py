@@ -506,7 +506,7 @@ def api_refresh_cover(item_id: int):
     db.set_setting(rejected_key, json.dumps(rejected))
 
     # Zoek nieuwe cover
-    cover_url, _transient = _find_cover(item, rejected)
+    cover_url, transient = _find_cover(item, rejected)
 
     if cover_url:
         db.set_setting(cache_key, cover_url)
@@ -515,7 +515,11 @@ def api_refresh_cover(item_id: int):
     # Geen alternatief: huidige cover laten staan (beter iets dan niets)
     if _is_real_cover(current):
         return jsonify({'cover_url': _cover_proxy_url(item_id, current), 'message': 'Geen andere cover gevonden'})
-    db.set_setting(cache_key, 'skip')
+
+    # Niets gevonden: als 'niet gevonden' onthouden (wordt later opnieuw geprobeerd),
+    # NIET als 'Geen cover' — dat is een bewuste keuze van de gebruiker.
+    hours = COVER_TRANSIENT_RETRY_HOURS if transient else COVER_MISS_RETRY_HOURS
+    db.set_setting(cache_key, f"miss:{(datetime.now() + timedelta(hours=hours)).isoformat()}")
     return jsonify({'cover_url': None, 'message': 'Geen andere cover gevonden'})
 
 
@@ -735,9 +739,11 @@ def api_update_status(item_id: int):
 #
 # Getrapte zoekvolgorde (zie _find_cover):
 #   1. Calibre-Web   — exacte cover zodra het boek geïmporteerd is
-#   2. Google Books  — met eigen API-sleutel (GOOGLE_BOOKS_API_KEY); zonder
+#   2. Apple Books   — iTunes Search API, Nederlandse e-bookwinkel, geen sleutel nodig;
+#                      beste dekking van recente Nederlandse titels
+#   3. Google Books  — met eigen API-sleutel (GOOGLE_BOOKS_API_KEY); zonder
 #                      sleutel is het gedeelde anonieme quotum vrijwel altijd op (HTTP 429)
-#   3. Open Library  — alleen met strenge auteur+titel controle (kent weinig NL vertalingen)
+#   4. Open Library  — alleen met strenge auteur+titel controle (kent weinig NL vertalingen)
 #
 # Cache (settings-tabel, key cover_<id>):
 #   "<url>"            gevonden cover (externe URL of "calibre:<book_id>")
@@ -849,7 +855,7 @@ def _find_cover(item: dict, rejected: list = None, status: dict = None) -> tuple
     else:
         _note(status, "calibre", f"geen cover voor book_id={book_id}")
 
-    for fetcher in (_fetch_google_books_cover, _fetch_openlibrary_cover):
+    for fetcher in (_fetch_apple_books_cover, _fetch_google_books_cover, _fetch_openlibrary_cover):
         url = fetcher(author, title, rejected, status)
         if url:
             return done(url)
@@ -940,6 +946,54 @@ def _normalize_for_search(text: str) -> str:
     text = unicodedata.normalize("NFD", text.lower())
     text = "".join(c for c in text if unicodedata.category(c) != "Mn")
     return text
+
+
+def _fetch_apple_books_cover(author: str, title: str, rejected: list = None, status: dict = None) -> str | None:
+    """
+    Zoek boekcover in de Nederlandse Apple Books-winkel (iTunes Search API).
+
+    Gratis en zonder sleutel (ca. 20 verzoeken per minuut). De artwork-URL
+    is te schalen: '/100x100bb.jpg' wordt '/600x600bb.jpg' (verhouding blijft behouden).
+    """
+    import requests as req
+
+    rejected = rejected or []
+    status = status if status is not None else {}
+    seen = 0
+
+    for term in (f"{author} {title}", title):
+        try:
+            resp = req.get("https://itunes.apple.com/search",
+                           params={"term": term, "country": "nl", "media": "ebook", "limit": 10},
+                           timeout=8, headers={'User-Agent': COVER_UA})
+            if resp.status_code in (403, 429) or resp.status_code >= 500:
+                status['transient'] = True
+                _note(status, "apple", f"HTTP {resp.status_code}")
+                return None
+            if resp.status_code != 200:
+                continue
+
+            results = resp.json().get("results", [])
+            seen += len(results)
+            for r in results:
+                art = r.get("artworkUrl100") or r.get("artworkUrl60")
+                if not art:
+                    continue
+                if not _cover_matches(author, title, f"{r.get('trackName', '')} {r.get('artistName', '')}"):
+                    continue
+                cover = re.sub(r'/\d+x\d+bb\.(jpg|png)$', r'/600x600bb.\1', art)
+                if cover in rejected:
+                    continue
+                _note(status, "apple", f"match: {r.get('trackName')} / {r.get('artistName')}")
+                return cover
+
+        except Exception as e:
+            status['transient'] = True
+            _note(status, "apple", f"fout: {type(e).__name__}")
+            continue
+
+    _note(status, "apple", f"{seen} resultaten, geen match")
+    return None
 
 
 def _fetch_google_books_cover(author: str, title: str, rejected: list = None, status: dict = None) -> str | None:
