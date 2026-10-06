@@ -290,6 +290,12 @@ def api_get_wishlist():
         'stuck': len([i for i in all_items if i['status'] == 'stuck']),
     }
 
+    flags = db.get_cover_flags()
+    for it in items:
+        f = flags.get(it['id'], {})
+        it['cover_locked'] = f.get('locked', False)
+        it['cover_skip'] = f.get('skip', False)
+
     return jsonify({
         'items': items,
         'stats': stats
@@ -449,12 +455,24 @@ def api_update_wishlist(item_id: int):
         db.update_wishlist_item(item_id, author=author, title=title, shelf_name=shelf_name)
 
         # Cover logica
+        cover_key = f"cover_{item_id}"
+        lock_key = f"coverlock_{item_id}"
+        cover_locked = data.get('cover_locked')
         if no_cover:
-            db.set_setting(f"cover_{item_id}", "skip")
+            db.set_setting(cover_key, "skip")
+            db.set_setting(lock_key, "")
         elif title_changed:
-            # Auteur/titel gewijzigd: opnieuw zoeken
-            db.set_setting(f"cover_{item_id}", "")
+            # Auteur/titel gewijzigd: opnieuw zoeken, vastzetten vervalt
+            db.set_setting(cover_key, "")
             db.set_setting(f"cover_rejected_{item_id}", "")  # Reset rejected lijst
+            db.set_setting(lock_key, "")
+        else:
+            current = db.get_setting(cover_key)
+            if current == "skip":
+                db.set_setting(cover_key, "")  # 'Geen cover' uitgevinkt: weer zoeken
+            elif cover_locked is not None:
+                # Alleen een echte, gevonden cover kan als 'klopt' worden vastgezet
+                db.set_setting(lock_key, "1" if (cover_locked and _is_real_cover(current)) else "")
 
         updated_item = db.get_wishlist_item(item_id)
         return jsonify({'message': 'Item bijgewerkt', 'item': updated_item})
@@ -475,10 +493,11 @@ def api_refresh_cover(item_id: int):
     if user['role'] != 'admin' and item.get('user_id') != user['id']:
         return jsonify({'error': 'Geen toegang'}), 403
 
-    # Huidige cover onthouden als "rejected"
+    # Huidige cover onthouden als "rejected"; een vastgezette cover is dan blijkbaar toch niet goed
     cache_key = f"cover_{item_id}"
     rejected_key = f"cover_rejected_{item_id}"
     current = db.get_setting(cache_key) or ''
+    db.set_setting(f"coverlock_{item_id}", "")
 
     rejected_raw = db.get_setting(rejected_key)
     rejected = json.loads(rejected_raw) if rejected_raw else []
@@ -746,15 +765,36 @@ def _cover_proxy_url(item_id: int, cover_value: str) -> str:
     return f"/api/cover-image/{item_id}?v={version}"
 
 
+def _word_matches(word: str, have: set) -> bool:
+    """
+    Woord komt voor in 'have', exact of als variant met dezelfde stam
+    (consultant/consulting, eiland/eilanden). Alleen voor woorden van 5+
+    letters en alleen als hooguit de laatste 3 letters verschillen, zodat
+    korte woorden als 'kat'/'kater' niet ten onrechte matchen.
+    """
+    if word in have:
+        return True
+    if len(word) < 5:
+        return False
+    for h in have:
+        if len(h) < 5:
+            continue
+        common = len(os.path.commonprefix([word, h]))
+        if common >= 5 and common >= max(len(word), len(h)) - 3:
+            return True
+    return False
+
+
 def _cover_matches(author: str, title: str, candidate_text: str) -> bool:
     """
     Strenge controle of een zoekresultaat écht dit boek is:
-    alle betekenisvolle titelwoorden én minstens één auteurwoord moeten voorkomen.
+    alle betekenisvolle titelwoorden (of een variant met dezelfde stam) én
+    minstens één auteurwoord moeten voorkomen.
     """
     have = set(calibreweb._match_tokens(candidate_text))
     title_tokens = calibreweb._match_tokens(title)
     author_tokens = calibreweb._match_tokens(author)
-    if not title_tokens or not all(t in have for t in title_tokens):
+    if not title_tokens or not all(_word_matches(t, have) for t in title_tokens):
         return False
     if author_tokens and not any(a in have for a in author_tokens):
         return False
@@ -914,8 +954,11 @@ def _fetch_google_books_cover(author: str, title: str, rejected: list = None, st
     author_last = author_parts[-1] if author_parts else author
 
     queries = [
+        # Precies: titelwoorden in de titel, achternaam als auteur
         f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author_last)}",
-        f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author)}",
+        # Los: vindt ook licht afwijkende titels (Flawless Consultant → Consulting);
+        # _cover_matches bewaakt daarna of het echt hetzelfde boek is
+        urllib.parse.quote(f"{author} {title}"),
     ]
     key_param = f"&key={urllib.parse.quote(GOOGLE_BOOKS_API_KEY)}" if GOOGLE_BOOKS_API_KEY else ""
     key_label = "met sleutel" if GOOGLE_BOOKS_API_KEY else "ZONDER sleutel"
