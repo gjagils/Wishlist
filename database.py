@@ -128,6 +128,13 @@ def init_db() -> None:
             conn.execute("ALTER TABLE wishlist ADD COLUMN requester_email TEXT")
             print("Database migratie: requester_email kolom toegevoegd")
 
+        # Migratie: calibre_book_id (gekoppeld boek in Calibre-Web, o.a. voor de cover)
+        try:
+            conn.execute("SELECT calibre_book_id FROM wishlist LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE wishlist ADD COLUMN calibre_book_id INTEGER")
+            print("Database migratie: calibre_book_id kolom toegevoegd")
+
         # Seed admin user als users tabel leeg is
         admin_username = os.environ.get('WEB_USERNAME', 'admin')
         existing_admin = conn.execute(
@@ -312,6 +319,15 @@ def update_wishlist_status(
                    VALUES (?, ?, ?)""",
                 (item_id, "info", log_msg)
             )
+
+
+def set_calibre_book_id(item_id: int, book_id: Optional[int]) -> None:
+    """Koppel (of ontkoppel met None) het Calibre-Web book_id aan een wishlist item."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE wishlist SET calibre_book_id = ? WHERE id = ?",
+            (book_id, item_id)
+        )
 
 
 def update_wishlist_item(item_id: int, author: Optional[str] = None,

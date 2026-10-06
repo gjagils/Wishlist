@@ -8,6 +8,7 @@ import json
 import os
 import re
 import threading
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, session, redirect, url_for, send_from_directory, Response
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -471,26 +472,24 @@ def api_refresh_cover(item_id: int):
     rejected_key = f"cover_rejected_{item_id}"
     current = db.get_setting(cache_key) or ''
 
-    # Laad bestaande rejected lijst
-    import json
     rejected_raw = db.get_setting(rejected_key)
     rejected = json.loads(rejected_raw) if rejected_raw else []
-    if current and current not in ('', 'skip') and current not in rejected:
+    if _is_real_cover(current) and current not in rejected:
         rejected.append(current)
     db.set_setting(rejected_key, json.dumps(rejected))
 
     # Zoek nieuwe cover
-    cover_url = (
-        _fetch_google_books_cover(item['author'], item['title'], rejected) or
-        _fetch_openlibrary_cover(item['author'], item['title'], rejected)
-    )
+    cover_url, _transient = _find_cover(item, rejected)
 
     if cover_url:
         db.set_setting(cache_key, cover_url)
-        return jsonify({'cover_url': f"/api/cover-image/{item_id}"})
-    else:
-        db.set_setting(cache_key, 'skip')
-        return jsonify({'cover_url': None, 'message': 'Geen andere cover gevonden'})
+        return jsonify({'cover_url': _cover_proxy_url(item_id, cover_url)})
+
+    # Geen alternatief: huidige cover laten staan (beter iets dan niets)
+    if _is_real_cover(current):
+        return jsonify({'cover_url': _cover_proxy_url(item_id, current), 'message': 'Geen andere cover gevonden'})
+    db.set_setting(cache_key, 'skip')
+    return jsonify({'cover_url': None, 'message': 'Geen andere cover gevonden'})
 
 
 @app.route('/api/wishlist/<int:item_id>', methods=['DELETE'])
@@ -705,65 +704,153 @@ def api_update_status(item_id: int):
     return jsonify({'message': 'Status bijgewerkt'}), 200
 
 
+# ===== BOEKCOVERS =====
+#
+# Getrapte zoekvolgorde (zie _find_cover):
+#   1. Calibre-Web   — exacte cover zodra het boek geïmporteerd is
+#   2. Google Books  — met eigen API-sleutel (GOOGLE_BOOKS_API_KEY); zonder
+#                      sleutel is het gedeelde anonieme quotum vrijwel altijd op (HTTP 429)
+#   3. Open Library  — alleen met strenge auteur+titel controle (kent weinig NL vertalingen)
+#
+# Cache (settings-tabel, key cover_<id>):
+#   "<url>"            gevonden cover (externe URL of "calibre:<book_id>")
+#   "skip"             gebruiker wil geen cover
+#   "miss:<iso>"       niet gevonden; opnieuw proberen na dat tijdstip
+#   ""/None            nog nooit gezocht
+
+GOOGLE_BOOKS_API_KEY = os.environ.get("GOOGLE_BOOKS_API_KEY", "").strip()
+COVER_MISS_RETRY_HOURS = float(os.environ.get("COVER_MISS_RETRY_HOURS", "24"))
+COVER_TRANSIENT_RETRY_HOURS = 1.0
+COVER_UA = 'Mozilla/5.0 (compatible; WishlistBot/1.0)'
+BROWSER_UA = ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+              '(KHTML, like Gecko) Chrome/125.0 Safari/537.36')
+
+
+def _is_real_cover(value) -> bool:
+    return bool(value) and value != 'skip' and not value.startswith('miss:')
+
+
+def _cover_proxy_url(item_id: int, cover_value: str) -> str:
+    """Proxy-URL met versie-parameter, zodat de browser na 'andere cover' niet de oude cached toont."""
+    import hashlib
+    version = hashlib.md5(cover_value.encode('utf-8')).hexdigest()[:8]
+    return f"/api/cover-image/{item_id}?v={version}"
+
+
+def _cover_matches(author: str, title: str, candidate_text: str) -> bool:
+    """
+    Strenge controle of een zoekresultaat écht dit boek is:
+    alle betekenisvolle titelwoorden én minstens één auteurwoord moeten voorkomen.
+    """
+    have = set(calibreweb._match_tokens(candidate_text))
+    title_tokens = calibreweb._match_tokens(title)
+    author_tokens = calibreweb._match_tokens(author)
+    if not title_tokens or not all(t in have for t in title_tokens):
+        return False
+    if author_tokens and not any(a in have for a in author_tokens):
+        return False
+    return True
+
+
+def _find_cover(item: dict, rejected: list = None) -> tuple:
+    """
+    Doorloop de bronnen in volgorde.
+
+    Returns: (cover_value, transient)
+      cover_value: "calibre:<book_id>" of externe URL, of None
+      transient:   True als een bron tijdelijk onbereikbaar was (quota/netwerk),
+                   zodat een 'niet gevonden' niet lang gecachet wordt
+    """
+    rejected = rejected or []
+    author, title = item['author'], item['title']
+    status = {'transient': False}
+
+    book_id = item.get('calibre_book_id')
+    if book_id and f"calibre:{book_id}" not in rejected:
+        if calibreweb.fetch_cover(book_id):
+            return f"calibre:{book_id}", False
+
+    for fetcher in (_fetch_google_books_cover, _fetch_openlibrary_cover):
+        url = fetcher(author, title, rejected, status)
+        if url:
+            return url, False
+
+    return None, status['transient']
+
+
+def _parse_miss(cached: str):
+    """'miss:<iso>' → datetime waarna opnieuw gezocht mag worden, of None."""
+    try:
+        return datetime.fromisoformat(cached.split(':', 1)[1])
+    except (ValueError, IndexError):
+        return None
+
+
 @app.route('/api/cover/<int:item_id>', methods=['GET'])
 @requires_auth
 def api_get_cover(item_id: int):
-    """Haal boekcover URL op. Fallback chain: Google Books → Open Library."""
+    """Haal boekcover URL op (zie _find_cover voor de zoekvolgorde)."""
     item = db.get_wishlist_item(item_id)
     if not item:
         return jsonify({'cover_url': None}), 404
 
-    # Check cache
     cache_key = f"cover_{item_id}"
     cached = db.get_setting(cache_key)
+
     if cached == 'skip':
         return jsonify({'cover_url': None})  # Gebruiker wil geen cover
-    if cached is not None and cached != '':
-        return jsonify({'cover_url': f"/api/cover-image/{item_id}"})
+    if _is_real_cover(cached):
+        # Boek inmiddels in Calibre-Web? Dan die cover verkiezen boven een externe gok.
+        book_id = item.get('calibre_book_id')
+        if book_id and not cached.startswith('calibre:') and calibreweb.fetch_cover(book_id):
+            cached = f"calibre:{book_id}"
+            db.set_setting(cache_key, cached)
+        return jsonify({'cover_url': _cover_proxy_url(item_id, cached)})
+    if cached and cached.startswith('miss:'):
+        retry_at = _parse_miss(cached)
+        if retry_at and datetime.now() < retry_at:
+            return jsonify({'cover_url': None})
 
-    # Fallback chain
-    cover_url = (
-        _fetch_google_books_cover(item['author'], item['title']) or
-        _fetch_openlibrary_cover(item['author'], item['title'])
-    )
+    rejected_raw = db.get_setting(f"cover_rejected_{item_id}")
+    rejected = json.loads(rejected_raw) if rejected_raw else []
 
-    # Cache resultaat (ook lege string = "niet gevonden")
-    db.set_setting(cache_key, cover_url or '')
+    cover_value, transient = _find_cover(item, rejected)
 
-    # Geef proxy URL terug zodat frontend geen CORS issues heeft
-    if cover_url:
-        import base64
-        proxy_url = f"/api/cover-image/{item_id}"
-        return jsonify({'cover_url': proxy_url})
+    if cover_value:
+        db.set_setting(cache_key, cover_value)
+        return jsonify({'cover_url': _cover_proxy_url(item_id, cover_value)})
 
+    hours = COVER_TRANSIENT_RETRY_HOURS if transient else COVER_MISS_RETRY_HOURS
+    retry_at = datetime.now() + timedelta(hours=hours)
+    db.set_setting(cache_key, f"miss:{retry_at.isoformat()}")
     return jsonify({'cover_url': None})
 
 
 @app.route('/api/cover-image/<int:item_id>', methods=['GET'])
 @requires_auth
 def api_cover_image(item_id: int):
-    """Proxy voor boekcover afbeeldingen — voorkomt CORS issues."""
+    """Proxy voor boekcover afbeeldingen — voorkomt CORS issues en verbergt Calibre-Web credentials."""
     import requests as req
 
-    cache_key = f"cover_{item_id}"
-    cover_url = db.get_setting(cache_key)
-
-    if not cover_url:
+    cover_value = db.get_setting(f"cover_{item_id}")
+    if not _is_real_cover(cover_value):
         return Response(status=404)
 
-    try:
-        resp = req.get(cover_url, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (compatible; WishlistBot/1.0)'
-        })
-        if resp.status_code != 200:
-            return Response(status=resp.status_code)
+    cache_headers = {'Cache-Control': 'private, max-age=86400'}  # 24h browser cache
 
+    if cover_value.startswith('calibre:'):
+        result = calibreweb.fetch_cover(int(cover_value.split(':', 1)[1]))
+        if not result:
+            return Response(status=404)
+        content, content_type = result
+        return Response(content, content_type=content_type, headers=cache_headers)
+
+    try:
+        resp = req.get(cover_value, timeout=10, headers={'User-Agent': BROWSER_UA})
         content_type = resp.headers.get('Content-Type', 'image/jpeg')
-        return Response(
-            resp.content,
-            content_type=content_type,
-            headers={'Cache-Control': 'public, max-age=86400'}  # 24h cache
-        )
+        if resp.status_code != 200 or not content_type.startswith('image/'):
+            return Response(status=resp.status_code if resp.status_code != 200 else 502)
+        return Response(resp.content, content_type=content_type, headers=cache_headers)
     except Exception:
         return Response(status=502)
 
@@ -776,12 +863,13 @@ def _normalize_for_search(text: str) -> str:
     return text
 
 
-def _fetch_google_books_cover(author: str, title: str, rejected: list = None) -> str | None:
+def _fetch_google_books_cover(author: str, title: str, rejected: list = None, status: dict = None) -> str | None:
     """Zoek boekcover via Google Books API met auteur+titel validatie."""
     import requests as req
     import urllib.parse
 
     rejected = rejected or []
+    status = status if status is not None else {}
 
     author_parts = author.strip().split()
     author_last = author_parts[-1] if author_parts else author
@@ -790,14 +878,16 @@ def _fetch_google_books_cover(author: str, title: str, rejected: list = None) ->
         f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author_last)}",
         f"intitle:{urllib.parse.quote(title)}+inauthor:{urllib.parse.quote(author)}",
     ]
-
-    norm_author = _normalize_for_search(author_last)
-    norm_title = _normalize_for_search(title)
+    key_param = f"&key={urllib.parse.quote(GOOGLE_BOOKS_API_KEY)}" if GOOGLE_BOOKS_API_KEY else ""
 
     for query in queries:
         try:
-            url = f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=10&fields=items(volumeInfo)"
+            url = (f"https://www.googleapis.com/books/v1/volumes?q={query}&maxResults=10"
+                   f"&fields=items(volumeInfo){key_param}")
             resp = req.get(url, timeout=8)
+            if resp.status_code == 429 or resp.status_code >= 500:
+                status['transient'] = True  # quota op / storing: niet lang als 'niet gevonden' cachen
+                return None
             if resp.status_code != 200:
                 continue
 
@@ -809,58 +899,67 @@ def _fetch_google_books_cover(author: str, title: str, rejected: list = None) ->
                 if not cover:
                     continue
 
-                result_title = _normalize_for_search(vol.get("title", ""))
-                result_authors = [_normalize_for_search(a) for a in vol.get("authors", [])]
+                candidate = f"{vol.get('title', '')} {vol.get('subtitle', '')} {' '.join(vol.get('authors', []))}"
+                if not _cover_matches(author, title, candidate):
+                    continue
 
-                title_ok = norm_title in result_title or result_title in norm_title
-                author_ok = any(norm_author in a or a in norm_author for a in result_authors)
-
-                if title_ok and author_ok:
-                    cover = cover.replace("http://", "https://")
-                    cover = cover.replace("&edge=curl", "")
-                    cover = cover.replace("zoom=1", "zoom=2")
-
-                    # Sla rejected covers over
-                    if cover in rejected:
-                        continue
-
-                    return cover
+                cover = cover.replace("http://", "https://")
+                cover = cover.replace("&edge=curl", "")
+                cover = cover.replace("zoom=1", "zoom=2")
+                if cover in rejected:
+                    continue
+                return cover
 
         except Exception:
+            status['transient'] = True
             continue
 
     return None
 
 
-def _fetch_openlibrary_cover(author: str, title: str, rejected: list = None) -> str | None:
-    """Zoek boekcover via Open Library Search API."""
+def _fetch_openlibrary_cover(author: str, title: str, rejected: list = None, status: dict = None) -> str | None:
+    """
+    Zoek boekcover via Open Library Search API.
+
+    Alleen resultaten die écht op auteur én titel matchen: Open Library kent
+    weinig Nederlandse vertalingen en een losse titel-zoekopdracht gaf anders
+    covers van willekeurige andere boeken met dezelfde titelwoorden.
+    """
     import requests as req
     import urllib.parse
 
+    rejected = rejected or []
+    status = status if status is not None else {}
+
     queries = [
         f"title={urllib.parse.quote(title)}&author={urllib.parse.quote(author)}",
-        f"title={urllib.parse.quote(title)}",
+        f"q={urllib.parse.quote(author + ' ' + title)}",
     ]
 
     for query in queries:
         try:
-            url = f"https://openlibrary.org/search.json?{query}&limit=3&fields=cover_i,title,author_name"
-            resp = req.get(url, timeout=8)
+            url = f"https://openlibrary.org/search.json?{query}&limit=5&fields=cover_i,title,author_name"
+            resp = req.get(url, timeout=8, headers={'User-Agent': COVER_UA})
+            if resp.status_code == 429 or resp.status_code >= 500:
+                status['transient'] = True
+                return None
             if resp.status_code != 200:
                 continue
 
-            data = resp.json()
-            docs = data.get("docs", [])
-
-            for doc in docs:
+            for doc in resp.json().get("docs", []):
                 cover_id = doc.get("cover_i")
-                if cover_id:
-                    cover_url = f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
-                    if rejected and cover_url in rejected:
-                        continue
-                    return cover_url
+                if not cover_id:
+                    continue
+                candidate = f"{doc.get('title', '')} {' '.join(doc.get('author_name', []))}"
+                if not _cover_matches(author, title, candidate):
+                    continue
+                cover_url = f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
+                if cover_url in rejected:
+                    continue
+                return cover_url
 
         except Exception:
+            status['transient'] = True
             continue
 
     return None

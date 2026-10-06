@@ -310,6 +310,11 @@ EMAIL_IMAP_SERVER=imap.gmail.com
 EMAIL_IMAP_PORT=993
 EMAIL_CHECK_INTERVAL=300
 EMAIL_ALLOWED_SENDERS=
+
+# BOEKCOVERS (optioneel)
+# Google Books API-sleutel: console.cloud.google.com → Books API inschakelen → API key.
+# Zonder sleutel is het gedeelde anonieme quotum vrijwel altijd op (HTTP 429).
+GOOGLE_BOOKS_API_KEY=
 ```
 
 ---
