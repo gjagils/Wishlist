@@ -997,3 +997,26 @@ body {
         justify-content: space-between;
     }
 }
+
+/* ===== Recente Activiteit: kop met mailcheck-knop ===== */
+.logs-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+}
+.logs-header .section-title { margin-bottom: 0; }
+.mail-check {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.mail-check-status {
+    font-size: 0.8rem;
+    color: var(--neutral-500);
+}
+.mail-check-status.error { color: var(--danger, #c0392b); }
+.card-btn:disabled { opacity: 0.6; cursor: default; }
