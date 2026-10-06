@@ -1186,9 +1186,9 @@ def api_admin_update_email_settings():
 @requires_auth
 @requires_admin
 def api_admin_reset_covers():
-    """Reset alle cover caches zodat covers opnieuw gezocht worden."""
-    count = db.delete_settings_by_prefix("cover_")
-    return jsonify({'message': f'{count} cover cache(s) gewist'})
+    """Zoek alle covers opnieuw. 'Geen cover'-keuzes en afgewezen covers blijven staan."""
+    count = db.reset_cover_cache()
+    return jsonify({'message': f'{count} cover(s) worden opnieuw gezocht'})
 
 
 @app.route('/api/health', methods=['GET'])

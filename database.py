@@ -482,6 +482,22 @@ def delete_settings_by_prefix(prefix: str) -> int:
         return cursor.rowcount
 
 
+def reset_cover_cache() -> int:
+    """
+    Wis gevonden en niet-gevonden covers zodat ze opnieuw gezocht worden.
+    Laat bewuste keuzes van gebruikers staan: 'skip' (geen cover) en de
+    lijsten met afgewezen covers (cover_rejected_*).
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            """DELETE FROM settings
+               WHERE key LIKE 'cover!_%' ESCAPE '!'
+                 AND key NOT LIKE 'cover!_rejected!_%' ESCAPE '!'
+                 AND COALESCE(value, '') != 'skip'"""
+        )
+        return cursor.rowcount
+
+
 def set_setting(key: str, value: str) -> None:
     """Sla setting op."""
     with get_db() as conn:
