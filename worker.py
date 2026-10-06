@@ -295,6 +295,7 @@ def finalize_import(item: dict, book_id: int) -> None:
     nzb_url = item.get('nzb_url')
 
     db.update_wishlist_status(item_id, "imported", nzb_url=nzb_url)
+    db.set_calibre_book_id(item_id, book_id)
     db.add_log(item_id, "info", f"✓ Geïmporteerd in Calibre-Web (book_id={book_id})")
 
     if not shelf_name:

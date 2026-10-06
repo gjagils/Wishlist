@@ -128,6 +128,13 @@ def init_db() -> None:
             conn.execute("ALTER TABLE wishlist ADD COLUMN requester_email TEXT")
             print("Database migratie: requester_email kolom toegevoegd")
 
+        # Migratie: calibre_book_id (gekoppeld boek in Calibre-Web, o.a. voor de cover)
+        try:
+            conn.execute("SELECT calibre_book_id FROM wishlist LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE wishlist ADD COLUMN calibre_book_id INTEGER")
+            print("Database migratie: calibre_book_id kolom toegevoegd")
+
         # Seed admin user als users tabel leeg is
         admin_username = os.environ.get('WEB_USERNAME', 'admin')
         existing_admin = conn.execute(
@@ -314,6 +321,15 @@ def update_wishlist_status(
             )
 
 
+def set_calibre_book_id(item_id: int, book_id: Optional[int]) -> None:
+    """Koppel (of ontkoppel met None) het Calibre-Web book_id aan een wishlist item."""
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE wishlist SET calibre_book_id = ? WHERE id = ?",
+            (book_id, item_id)
+        )
+
+
 def update_wishlist_item(item_id: int, author: Optional[str] = None,
                         title: Optional[str] = None,
                         shelf_name: Optional[str] = None) -> bool:
@@ -462,6 +478,22 @@ def delete_settings_by_prefix(prefix: str) -> int:
         cursor = conn.execute(
             "DELETE FROM settings WHERE key LIKE ?",
             (f"{prefix}%",)
+        )
+        return cursor.rowcount
+
+
+def reset_cover_cache() -> int:
+    """
+    Wis gevonden en niet-gevonden covers zodat ze opnieuw gezocht worden.
+    Laat bewuste keuzes van gebruikers staan: 'skip' (geen cover) en de
+    lijsten met afgewezen covers (cover_rejected_*).
+    """
+    with get_db() as conn:
+        cursor = conn.execute(
+            """DELETE FROM settings
+               WHERE key LIKE 'cover!_%' ESCAPE '!'
+                 AND key NOT LIKE 'cover!_rejected!_%' ESCAPE '!'
+                 AND COALESCE(value, '') != 'skip'"""
         )
         return cursor.rowcount
 

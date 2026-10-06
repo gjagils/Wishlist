@@ -48,6 +48,10 @@ services:
       - CALIBREWEB_USERNAME=${CALIBREWEB_USERNAME:-}
       - CALIBREWEB_PASSWORD=${CALIBREWEB_PASSWORD:-}
 
+      # Boekcovers (optioneel): Google Books API-sleutel, zonder sleutel is het
+      # anonieme quotum vrijwel altijd op en valt de app terug op andere bronnen
+      - GOOGLE_BOOKS_API_KEY=${GOOGLE_BOOKS_API_KEY:-}
+
       # === SMTP ===
       - SMTP_SERVER=${SMTP_SERVER:-smtp.gmail.com}
       - SMTP_PORT=${SMTP_PORT:-587}

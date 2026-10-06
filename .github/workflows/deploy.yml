@@ -64,7 +64,7 @@ jobs:
 
           # Zorg dat nieuwe env-opties bestaan in de stack (leeg) zodat ze in
           # Portainer ingevuld kunnen worden. Bestaande waarden blijven staan.
-          for VAR in ANTHROPIC_API_KEY; do
+          for VAR in ANTHROPIC_API_KEY GOOGLE_BOOKS_API_KEY; do
             CURRENT_ENV=$(echo "$CURRENT_ENV" | jq --arg n "$VAR" \
               'if any(.[]; .name == $n) then . else . + [{"name": $n, "value": ""}] end')
           done

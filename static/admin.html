@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wishlist - Gebruikersbeheer</title>
+    <title>Wishlist - Admin</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect x='20' y='15' width='60' height='70' rx='3' fill='%2300A699'/%3E%3Crect x='25' y='20' width='50' height='60' fill='%23fff'/%3E%3Cline x1='35' y1='30' x2='65' y2='30' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='40' x2='65' y2='40' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='50' x2='65' y2='50' stroke='%2300A699' stroke-width='2'/%3E%3Cline x1='35' y1='60' x2='55' y2='60' stroke='%2300A699' stroke-width='2'/%3E%3C/svg%3E">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -207,13 +207,14 @@
 <body>
     <div class="admin-layout">
         <div class="admin-header">
-            <h1>Gebruikersbeheer</h1>
+            <h1>Admin</h1>
             <div class="admin-header-actions">
                 <a href="/" class="admin-link">Terug naar Wishlist</a>
                 <a href="/logout" class="admin-link secondary">Uitloggen</a>
             </div>
         </div>
 
+        <h2 style="font-family:var(--font-heading);font-size:1.1rem;font-weight:600;margin-bottom:10px">Gebruikers</h2>
         <p class="admin-note">
             Gebruikers verschijnen hier automatisch na hun eerste login via Calibre-Web. Wijs boekenplanken toe zodat ze items kunnen toevoegen.
         </p>
@@ -292,6 +293,16 @@
             </div>
             <button class="btn-save" style="margin-top:14px" onclick="saveEmailSettings()">Opslaan</button>
             <span id="email-settings-message" style="margin-left:12px;font-size:0.85rem"></span>
+        </div>
+
+        <div class="card" style="background:var(--white);border-radius:12px;padding:24px 28px;box-shadow:0 1px 3px rgba(0,0,0,0.06);margin-top:20px">
+            <h2 style="font-family:var(--font-heading);font-size:1.1rem;font-weight:600;margin-bottom:18px;border-bottom:2px solid var(--neutral-200);padding-bottom:10px">Boekcovers</h2>
+            <p style="color:var(--neutral-500);font-size:0.8rem;margin-bottom:16px">
+                Zoek de covers van alle boeken opnieuw op, bijvoorbeeld na het instellen van een Google Books API-sleutel.
+                Boeken waarbij "Geen cover" is aangevinkt en covers die eerder zijn afgewezen blijven ongemoeid.
+            </p>
+            <button class="btn-save" onclick="resetCovers()">Covers opnieuw zoeken</button>
+            <span id="reset-covers-message" style="margin-left:12px;font-size:0.85rem"></span>
         </div>
     </div>
 
@@ -530,6 +541,26 @@
                 msg.style.color = 'var(--danger)';
             }
             setTimeout(() => msg.textContent = '', 3000);
+        }
+
+        async function resetCovers() {
+            const msg = document.getElementById('reset-covers-message');
+            if (!confirm('Alle covers opnieuw laten zoeken?')) return;
+            try {
+                const resp = await fetch('/api/admin/reset-covers', { method: 'POST' });
+                const data = await resp.json().catch(() => ({}));
+                if (resp.ok) {
+                    msg.textContent = '✓ ' + (data.message || 'Covers gewist') + '. Open de wishlist om ze te laden.';
+                    msg.style.color = 'var(--primary)';
+                } else {
+                    msg.textContent = data.error || 'Resetten mislukt';
+                    msg.style.color = 'var(--danger)';
+                }
+            } catch (e) {
+                msg.textContent = 'Netwerkfout';
+                msg.style.color = 'var(--danger)';
+            }
+            setTimeout(() => msg.textContent = '', 6000);
         }
 
         function copyAutolink(userId) {
