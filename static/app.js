@@ -731,6 +731,100 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 });
 
+// ===== EIGEN COVER =====
+async function sendCustomCover(body, isJson) {
+    if (!editingItemId) return;
+    const msg = document.getElementById('edit-message');
+    showMessage(msg, 'Cover opslaan...', 'success');
+    try {
+        const response = await fetch(`/api/cover/${editingItemId}/custom`, {
+            method: 'POST',
+            headers: isJson ? { 'Content-Type': 'application/json' } : undefined,
+            body,
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            showMessage(msg, data.error || 'Opslaan mislukt', 'error');
+            return;
+        }
+        showMessage(msg, data.message || 'Cover opgeslagen', 'success');
+        const lockBox = document.getElementById('edit-cover-locked');
+        lockBox.checked = true;
+        lockBox.disabled = false;
+        lockBox.closest('label').style.opacity = '';
+        document.getElementById('edit-no-cover').checked = false;
+        document.getElementById('custom-cover-url').value = '';
+        coverCache.delete(String(editingItemId));
+        lastWishlistJson = null;
+        loadWishlist();
+    } catch (error) {
+        showMessage(msg, 'Netwerkfout: ' + error.message, 'error');
+    }
+}
+
+function uploadCoverFile(file) {
+    if (!file || !file.type.startsWith('image/')) {
+        showMessage(document.getElementById('edit-message'), 'Dat is geen afbeelding', 'error');
+        return;
+    }
+    const form = new FormData();
+    form.append('file', file);
+    sendCustomCover(form, false);
+}
+
+function useCoverUrl() {
+    const url = document.getElementById('custom-cover-url').value.trim();
+    if (!url) {
+        showMessage(document.getElementById('edit-message'), 'Vul eerst een link in', 'error');
+        return;
+    }
+    sendCustomCover(JSON.stringify({ url }), true);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const fileInput = document.getElementById('custom-cover-file');
+    if (fileInput) {
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files[0]) uploadCoverFile(fileInput.files[0]);
+            fileInput.value = '';
+        });
+    }
+
+    // Plakken (Cmd/Ctrl+V) van een gekopieerde afbeelding terwijl het bewerkvenster open is
+    document.addEventListener('paste', (e) => {
+        const modal = document.getElementById('edit-modal');
+        if (!editingItemId || !modal || modal.style.display === 'none') return;
+        const items = (e.clipboardData && e.clipboardData.items) || [];
+        for (const it of items) {
+            if (it.kind === 'file' && it.type.startsWith('image/')) {
+                e.preventDefault();
+                uploadCoverFile(it.getAsFile());
+                return;
+            }
+        }
+        // Geplakte tekst die een link is in het linkveld: laat de browser dat gewoon doen
+    });
+
+    // Slepen en neerzetten op het cover-vak
+    const drop = document.getElementById('custom-cover-drop');
+    if (drop) {
+        ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, (e) => {
+            e.preventDefault(); drop.classList.add('dragover');
+        }));
+        ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => {
+            e.preventDefault(); drop.classList.remove('dragover');
+        }));
+        drop.addEventListener('drop', (e) => {
+            const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            if (file) { uploadCoverFile(file); return; }
+            const url = e.dataTransfer && (e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain'));
+            if (url && /^https?:\/\//.test(url.trim())) {
+                sendCustomCover(JSON.stringify({ url: url.trim() }), true);
+            }
+        });
+    }
+});
+
 async function searchNewCover() {
     if (!editingItemId) return;
     const msg = document.getElementById('edit-message');

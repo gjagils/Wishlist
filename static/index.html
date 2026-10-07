@@ -221,6 +221,17 @@
                             Geen cover
                         </label>
                     </div>
+                    <div class="custom-cover" id="custom-cover-drop">
+                        <div class="custom-cover-label">Eigen cover: upload een afbeelding, plak er een met Cmd+V of Ctrl+V, of vul een link in.</div>
+                        <div class="custom-cover-row">
+                            <label class="btn-modal-secondary custom-cover-file">
+                                Afbeelding kiezen
+                                <input type="file" id="custom-cover-file" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+                            </label>
+                            <input type="url" id="custom-cover-url" placeholder="https://.../cover.jpg" autocomplete="off">
+                            <button type="button" class="btn-modal-secondary" onclick="useCoverUrl()">Gebruik link</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="edit-modal-actions">
                     <button type="submit" class="btn-add">Opslaan</button>

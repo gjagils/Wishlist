@@ -812,6 +812,7 @@ body {
     display: flex;
     align-items: center;
     gap: 16px;
+    flex-wrap: wrap;
 }
 
 .edit-checkbox {
@@ -1020,3 +1021,37 @@ body {
 }
 .mail-check-status.error { color: var(--danger, #c0392b); }
 .card-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ===== Eigen cover in het bewerkvenster ===== */
+.custom-cover {
+    margin-top: 14px;
+    padding: 12px;
+    border: 1.5px dashed var(--neutral-200);
+    border-radius: 8px;
+    transition: border-color 0.15s, background 0.15s;
+}
+.custom-cover.dragover {
+    border-color: var(--primary);
+    background: var(--primary-light, #e6f6f5);
+}
+.custom-cover-label {
+    font-size: 0.8rem;
+    color: var(--neutral-500);
+    margin-bottom: 10px;
+}
+.custom-cover-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.custom-cover-row input[type="url"] {
+    flex: 1 1 180px;
+    min-width: 0;
+    padding: 8px 12px;
+    border: 1.5px solid var(--neutral-200);
+    border-radius: 8px;
+    font-family: var(--font-body);
+    font-size: 0.85rem;
+}
+.custom-cover-file { cursor: pointer; }
