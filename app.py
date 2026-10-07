@@ -523,6 +523,53 @@ def api_refresh_cover(item_id: int):
     return jsonify({'cover_url': None, 'message': 'Geen andere cover gevonden'})
 
 
+@app.route('/api/cover/<int:item_id>/custom', methods=['POST'])
+@requires_auth
+def api_custom_cover(item_id: int):
+    """
+    Stel zelf een cover in: als bestand (multipart 'file', ook voor plakken)
+    of als link (JSON {'url': ...}). De afbeelding wordt op de NAS bewaard en
+    de cover meteen vastgezet, zodat 'Covers opnieuw zoeken' hem laat staan.
+    """
+    user = get_current_user()
+    item = db.get_wishlist_item(item_id)
+    if not item:
+        return jsonify({'error': 'Item niet gevonden'}), 404
+    if user['role'] != 'admin' and item.get('user_id') != user['id']:
+        return jsonify({'error': 'Geen toegang'}), 403
+
+    if 'file' in request.files:
+        data = request.files['file'].read(CUSTOM_COVER_MAX_BYTES + 1)
+    else:
+        url = ((request.get_json(silent=True) or {}).get('url') or '').strip()
+        if not url:
+            return jsonify({'error': 'Kies een afbeelding of vul een link in'}), 400
+        data, error = _download_image(url)
+        if error:
+            return jsonify({'error': error}), 400
+
+    if not data:
+        return jsonify({'error': 'Leeg bestand'}), 400
+    if len(data) > CUSTOM_COVER_MAX_BYTES:
+        return jsonify({'error': f'Afbeelding is groter dan {CUSTOM_COVER_MAX_BYTES // (1024 * 1024)} MB'}), 400
+    kind = _sniff_image(data)
+    if not kind:
+        return jsonify({'error': 'Dit is geen JPG, PNG, GIF of WebP-afbeelding'}), 400
+    ext, _mime = kind
+
+    os.makedirs(COVERS_DIR, exist_ok=True)
+    _remove_custom_covers(item_id)
+    name = f"{item_id}.{ext}"
+    with open(_custom_cover_path(name), 'wb') as f:
+        f.write(data)
+
+    value = f"upload:{name}:{int(datetime.now().timestamp())}"  # tijdstempel → nieuwe proxy-URL, geen oude browsercache
+    db.set_setting(f"cover_{item_id}", value)
+    db.set_setting(f"coverlock_{item_id}", "1")
+    db.add_log(item_id, "info", "Eigen cover ingesteld")
+    return jsonify({'cover_url': _cover_proxy_url(item_id, value), 'message': 'Cover opgeslagen en vastgezet'})
+
+
 @app.route('/api/wishlist/<int:item_id>', methods=['DELETE'])
 @requires_auth
 def api_delete_wishlist(item_id: int):
@@ -539,6 +586,7 @@ def api_delete_wishlist(item_id: int):
     deleted = db.delete_wishlist_item(item_id)
 
     if deleted:
+        _remove_custom_covers(item_id)
         return jsonify({'message': 'Item verwijderd'}), 200
     else:
         return jsonify({'error': 'Item niet gevonden'}), 404
@@ -766,6 +814,79 @@ def _is_real_cover(value) -> bool:
     return bool(value) and value != 'skip' and not value.startswith('miss:')
 
 
+# Eigen covers (upload, plakken of link) worden op de NAS bewaard, naast de database
+COVERS_DIR = os.path.join(os.path.dirname(db.DB_PATH) or '.', 'covers')
+CUSTOM_COVER_MAX_BYTES = 8 * 1024 * 1024
+_IMAGE_SIGNATURES = (
+    (b'\xff\xd8\xff', 'jpg', 'image/jpeg'),
+    (b'\x89PNG\r\n\x1a\n', 'png', 'image/png'),
+    (b'GIF87a', 'gif', 'image/gif'),
+    (b'GIF89a', 'gif', 'image/gif'),
+)
+
+
+def _sniff_image(data: bytes):
+    """(extensie, mimetype) op basis van de eerste bytes, of None als het geen afbeelding is."""
+    for sig, ext, mime in _IMAGE_SIGNATURES:
+        if data.startswith(sig):
+            return ext, mime
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return 'webp', 'image/webp'
+    return None
+
+
+def _custom_cover_path(name: str) -> str:
+    """Pad van een opgeslagen eigen cover; weigert alles buiten COVERS_DIR."""
+    if not re.fullmatch(r'\d+\.(jpg|png|gif|webp)', name or ''):
+        raise ValueError('ongeldige covernaam')
+    return os.path.join(COVERS_DIR, name)
+
+
+def _remove_custom_covers(item_id: int) -> None:
+    for ext in ('jpg', 'png', 'gif', 'webp'):
+        try:
+            os.remove(os.path.join(COVERS_DIR, f"{item_id}.{ext}"))
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            print(f"[cover] kon oude eigen cover niet verwijderen: {e}", flush=True)
+
+
+def _is_public_http_url(url: str) -> bool:
+    """Alleen http(s) naar publieke adressen: de server mag niet het eigen netwerk in."""
+    import ipaddress
+    import socket
+    import urllib.parse
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == 'https' else 80))
+    except socket.gaierror:
+        return False
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            return False
+    return True
+
+
+def _download_image(url: str):
+    """Haal een afbeelding op van een publieke URL. Returns (bytes, None) of (None, foutmelding)."""
+    import requests as req
+    if not _is_public_http_url(url):
+        return None, 'Alleen een gewone http(s)-link naar een afbeelding op internet werkt'
+    try:
+        resp = req.get(url, timeout=15, stream=True, allow_redirects=False,
+                       headers={'User-Agent': BROWSER_UA, 'Accept': 'image/*'})
+        if resp.status_code != 200:
+            return None, f'De site gaf HTTP {resp.status_code} terug; upload of plak de afbeelding in plaats daarvan'
+        data = resp.raw.read(CUSTOM_COVER_MAX_BYTES + 1, decode_content=True)
+    except Exception as e:
+        return None, f'Ophalen mislukt ({type(e).__name__}); upload of plak de afbeelding in plaats daarvan'
+    return data, None
+
+
 def _cover_proxy_url(item_id: int, cover_value: str) -> str:
     """Proxy-URL met versie-parameter, zodat de browser na 'andere cover' niet de oude cached toont."""
     import hashlib
@@ -889,7 +1010,8 @@ def api_get_cover(item_id: int):
     if _is_real_cover(cached):
         # Boek inmiddels in Calibre-Web? Dan die cover verkiezen boven een externe gok.
         book_id = item.get('calibre_book_id')
-        if book_id and not cached.startswith('calibre:') and calibreweb.fetch_cover(book_id):
+        locked = db.get_setting(f"coverlock_{item_id}") == '1'
+        if book_id and not locked and not cached.startswith('calibre:') and calibreweb.fetch_cover(book_id):
             cached = f"calibre:{book_id}"
             db.set_setting(cache_key, cached)
         return jsonify({'cover_url': _cover_proxy_url(item_id, cached)})
@@ -924,6 +1046,16 @@ def api_cover_image(item_id: int):
         return Response(status=404)
 
     cache_headers = {'Cache-Control': 'private, max-age=86400'}  # 24h browser cache
+
+    if cover_value.startswith('upload:'):
+        try:
+            path = _custom_cover_path(cover_value.split(':')[1])
+            with open(path, 'rb') as f:
+                content = f.read()
+        except (ValueError, OSError):
+            return Response(status=404)
+        kind = _sniff_image(content)
+        return Response(content, content_type=kind[1] if kind else 'image/jpeg', headers=cache_headers)
 
     if cover_value.startswith('calibre:'):
         result = calibreweb.fetch_cover(int(cover_value.split(':', 1)[1]))
