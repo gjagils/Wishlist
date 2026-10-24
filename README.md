@@ -211,6 +211,9 @@ Klik op "Verwijder" bij een item.
 | `SAB_BASE_URL` | - | **VERPLICHT** - URL van SABnzbd |
 | `SAB_APIKEY` | - | **VERPLICHT** - SABnzbd API key |
 | `SAB_CATEGORY` | books | SABnzbd categorie |
+| `BOEKENPAKKET_QUERY` | boekenpakket | Nieuwe Spotweb-posts met deze term in de titel worden in z'n geheel gedownload (bestaande posts bij de eerste run worden overgeslagen). Leeg = uit |
+| `BOEKENPAKKET_SAB_CATEGORY` | `SAB_CATEGORY` | SABnzbd categorie voor boekenpakketten |
+| `BOEKENPAKKET_CALIBRE_DELAY` | 3600 | Seconden na een nieuw pakket waarna pending items tegen Calibre-Web worden gecheckt |
 | `WEB_USERNAME` | admin | Web UI gebruikersnaam |
 | `WEB_PASSWORD` | wishlist | Web UI wachtwoord |
 | `EMAIL_ADDRESS` | - | Gmail adres (optioneel) |

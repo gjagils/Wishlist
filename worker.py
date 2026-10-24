@@ -4,6 +4,7 @@ Worker proces voor Wishlist applicatie.
 Leest pending items uit database, zoekt in Spotweb, en voegt toe aan SABnzbd.
 """
 import os
+import json
 import time
 import re
 import requests
@@ -27,6 +28,14 @@ IMPORT_CHECK_SECONDS = int(os.environ.get("IMPORT_CHECK_SECONDS", "120"))  # 2 m
 IMPORT_TIMEOUT_HOURS = float(os.environ.get("IMPORT_TIMEOUT_HOURS", "6"))
 SPOTWEB_CAT = os.environ.get("SPOTWEB_CAT", "7020")  # Ebook
 SAB_CATEGORY = os.environ.get("SAB_CATEGORY", "books")
+
+# Boekenpakketten: nieuwe Spotweb-posts met deze zoekterm in de titel worden
+# in zijn geheel gedownload. Leeg = uitgeschakeld.
+BOEKENPAKKET_QUERY = os.environ.get("BOEKENPAKKET_QUERY", "boekenpakket").strip()
+BOEKENPAKKET_SAB_CATEGORY = os.environ.get("BOEKENPAKKET_SAB_CATEGORY") or SAB_CATEGORY
+# Na een nieuw pakket: zo lang wachten en dan pending items tegen Calibre-Web checken
+BOEKENPAKKET_CALIBRE_DELAY = int(os.environ.get("BOEKENPAKKET_CALIBRE_DELAY", "3600"))  # 1 uur
+BOEKENPAKKET_SEEN_KEY = "boekenpakket_seen"
 
 # Stopwoorden voor matching
 STOPWORDS: Set[str] = {
@@ -187,9 +196,9 @@ def spotweb_search(author: str, title: str) -> Optional[str]:
     return None
 
 
-def sab_addurl(nzb_url: str, nzbname: str) -> bool:
+def sab_addurl(nzb_url: str, nzbname: str, category: Optional[str] = None) -> bool:
     """
-    Voeg NZB URL toe aan SABnzbd.
+    Voeg NZB URL toe aan SABnzbd (in `category`, standaard SAB_CATEGORY).
 
     Returns: True als succesvol, anders False
     """
@@ -201,8 +210,9 @@ def sab_addurl(nzb_url: str, nzbname: str) -> bool:
         "output": "json",
     }
 
-    if SAB_CATEGORY:
-        params["cat"] = SAB_CATEGORY
+    category = SAB_CATEGORY if category is None else category
+    if category:
+        params["cat"] = category
 
     url = f"{SAB_BASE_URL}/api?{urlencode(params)}"
 
@@ -221,6 +231,89 @@ def sab_addurl(nzb_url: str, nzbname: str) -> bool:
     except Exception as e:
         db.add_log(None, "error", f"SABnzbd fout: {e}")
         return False
+
+
+def spotweb_releases(query: str, limit: int = 50) -> List[dict]:
+    """
+    Haal de nieuwste Spotweb-posts op voor een zoekterm (nieuwste eerst).
+
+    Returns: lijst van {'guid', 'title', 'url'}; gooit een exception als
+    Spotweb niet bereikbaar is (zodat dat niet als 'geen posts' telt).
+    """
+    params = {
+        "apikey": SPOTWEB_APIKEY,
+        "t": "search",
+        "extended": "1",
+        "q": query,
+        "cat": SPOTWEB_CAT,
+        "limit": str(limit),
+    }
+    r = requests.get(f"{SPOTWEB_BASE_URL}/api?{urlencode(params)}", timeout=30)
+    r.raise_for_status()
+
+    root = etree.fromstring(r.content, etree.XMLParser(recover=True))
+    channel = root.find("channel") if root is not None else None
+    if channel is None:
+        raise ValueError("Onverwacht antwoord van Spotweb (geen channel)")
+
+    releases = []
+    for item in channel.findall("item"):
+        title = (item.findtext("title") or "").strip()
+        guid = (item.findtext("guid") or "").strip()
+        enc = item.find("enclosure")
+        if not title or not guid or enc is None or "url" not in enc.attrib:
+            continue
+        releases.append({"guid": guid, "title": title, "url": enc.attrib["url"]})
+    return releases
+
+
+def check_boekenpakketten() -> int:
+    """
+    Download nieuwe boekenpakketten (posts met BOEKENPAKKET_QUERY in de titel)
+    in hun geheel via SABnzbd. Welke posts al gezien zijn staat in de settings;
+    bij de allereerste run worden de bestaande pakketten alleen als gezien
+    gemarkeerd, zodat niet de hele historie alsnog binnenkomt.
+
+    Returns: aantal pakketten dat aan SABnzbd is toegevoegd
+    """
+    if not BOEKENPAKKET_QUERY:
+        return 0
+
+    try:
+        releases = spotweb_releases(BOEKENPAKKET_QUERY)
+    except Exception as e:
+        db.add_log(None, "warning", f"Boekenpakketten ophalen uit Spotweb mislukt: {e}")
+        return 0
+
+    needle = _norm(BOEKENPAKKET_QUERY)
+    releases = [r for r in releases if needle in _norm(r["title"])]
+
+    raw_seen = db.get_setting(BOEKENPAKKET_SEEN_KEY)
+    if raw_seen is None:
+        if releases:
+            db.set_setting(BOEKENPAKKET_SEEN_KEY, json.dumps([r["guid"] for r in releases]))
+            db.add_log(None, "info",
+                       f"Boekenpakketten volgen gestart: {len(releases)} bestaande pakketten overgeslagen, "
+                       f"nieuwe posts worden voortaan automatisch gedownload")
+        return 0
+
+    seen = json.loads(raw_seen)
+    queued = 0
+
+    # Oudste eerst, zodat de volgorde in SABnzbd die van de posts volgt
+    for release in reversed(releases):
+        if release["guid"] in seen:
+            continue
+        # Mislukt toevoegen → niet als gezien markeren, volgende ronde opnieuw
+        if sab_addurl(release["url"], release["title"], category=BOEKENPAKKET_SAB_CATEGORY):
+            seen.append(release["guid"])
+            queued += 1
+            db.add_log(None, "info", f"✓ Boekenpakket toegevoegd aan SABnzbd: {release['title']}")
+
+    if queued:
+        db.set_setting(BOEKENPAKKET_SEEN_KEY, json.dumps(seen[-500:]))
+
+    return queued
 
 
 def process_item(item: dict) -> None:
@@ -509,18 +602,23 @@ def worker_loop() -> None:
     print("Worker gestart")
 
     last_search_time = 0
-    last_calibre_check = 0
+    next_calibre_check = 0
 
     while True:
         try:
             now = time.time()
 
             # Dagelijkse check: bestaan pending items al in Calibre-Web?
-            if now - last_calibre_check >= CALIBRE_CHECK_SECONDS:
+            if now >= next_calibre_check:
                 check_existing_in_calibre()
-                last_calibre_check = time.time()
+                next_calibre_check = time.time() + CALIBRE_CHECK_SECONDS
 
             if now - last_search_time >= INTERVAL_SECONDS:
+                # Nieuw boekenpakket binnen? Dan na de import eerder checken
+                # of er pending items in zaten.
+                if check_boekenpakketten():
+                    next_calibre_check = min(next_calibre_check, time.time() + BOEKENPAKKET_CALIBRE_DELAY)
+
                 pending_items = db.get_wishlist_items(status='pending')
 
                 if pending_items:
