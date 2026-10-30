@@ -7,6 +7,7 @@ import os
 import json
 import time
 import re
+import unicodedata
 import requests
 from datetime import datetime
 from urllib.parse import urlencode
@@ -44,11 +45,16 @@ STOPWORDS: Set[str] = {
 }
 
 
+# Letters die NFKD niet opsplitst in basisletter + accent
+LETTER_FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ß": "ss", "ł": "l", "đ": "d", "ð": "d", "þ": "th"})
+
+
 def _norm(s: str) -> str:
-    """Normaliseer string voor matching."""
-    s = (s or "").lower()
+    """Normaliseer string voor matching (Grøndahl en Gröndahl matchen Grondahl)."""
+    s = (s or "").lower().translate(LETTER_FOLD)
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
     s = s.replace("–", "-").replace("—", "-")
-    s = re.sub(r"[^a-z0-9à-ÿ\s-]", " ", s, flags=re.UNICODE)
+    s = re.sub(r"[^a-z0-9\s-]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
