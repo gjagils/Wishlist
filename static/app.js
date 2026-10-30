@@ -79,17 +79,18 @@ async function loadUsersForAdmin() {
             }
 
             const targetUser = allUsers.find(u => u.id === parseInt(select.value));
-            if (!targetUser || !targetUser.allowed_shelves) return;
+
+            // Zonder toegewezen planken: volledige lijst tonen, zoals de server ook toestaat
+            if (!targetUser || !targetUser.allowed_shelves || targetUser.allowed_shelves.length === 0) {
+                loadShelves();
+                return;
+            }
 
             // Filter plank-dropdown naar planken van geselecteerde user
-            const currentOptions = Array.from(shelfSelect.options).map(o => o.value);
-            shelfSelect.innerHTML = '';
-            targetUser.allowed_shelves.forEach(name => {
-                const opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name;
-                shelfSelect.appendChild(opt);
-            });
+            fillShelfSelect(shelfSelect, targetUser.allowed_shelves.map(name => ({
+                value: name,
+                label: name,
+            })));
         });
 
         group.style.display = '';
@@ -118,27 +119,44 @@ function toggleSidebar() {
 
 // ===== API CALLS =====
 async function loadShelves() {
+    const select = document.getElementById('shelf');
+    const group = document.getElementById('shelf-group');
+    if (!select || !group) return;
+
     try {
         const response = await fetch('/api/shelves');
         if (!response.ok) return;
 
         const data = await response.json();
-        if (!data.configured || !data.shelves || data.shelves.length === 0) return;
+        if (!data.configured) return;
 
-        const select = document.getElementById('shelf');
-        const group = document.getElementById('shelf-group');
-
-        data.shelves.forEach(shelf => {
-            const option = document.createElement('option');
-            option.value = shelf.name;
-            option.textContent = `${shelf.name} (${shelf.count})`;
-            select.appendChild(option);
-        });
+        const shelves = data.shelves || [];
+        fillShelfSelect(select, shelves.map(s => ({
+            value: s.name,
+            label: `${s.name} (${s.count})`,
+        })), shelves.length ? null : (data.error || 'Geen planken gevonden'));
 
         group.style.display = '';
     } catch (error) {
         console.error('Error loading shelves:', error);
     }
+}
+
+// Vult een plank-dropdown opnieuw; houdt altijd een selecteerbare placeholder
+function fillShelfSelect(select, options, emptyMessage) {
+    select.innerHTML = '';
+
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = emptyMessage || 'Selecteer plank';
+    select.appendChild(placeholder);
+
+    options.forEach(({ value, label }) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+    });
 }
 
 async function loadWishlist() {

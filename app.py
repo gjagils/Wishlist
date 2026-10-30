@@ -1362,6 +1362,7 @@ def api_get_shelves():
 
         return jsonify({'shelves': shelves, 'configured': True})
     except Exception as e:
+        print(f"[SHELVES] Ophalen planken mislukt: {e}")
         return jsonify({
             'shelves': [],
             'configured': True,
