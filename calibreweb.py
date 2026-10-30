@@ -154,6 +154,27 @@ def authenticate_user(username: str, password: str) -> bool:
         return False
 
 
+def _is_login_page(url: str, html: str) -> bool:
+    """Herken de loginpagina: een verlopen sessie levert die op zonder foutcode."""
+    if url and url.split("?")[0].rstrip("/").endswith("/login"):
+        return True
+    return bool(re.search(r'<input[^>]+name=["\']password["\']', html))
+
+
+def _fetch_home() -> tuple:
+    """Haal de Calibre-Web homepage op, met een nieuwe sessie bij netwerkfouten."""
+    try:
+        resp = _get_session().get(f"{CALIBREWEB_URL}/", timeout=10)
+        resp.raise_for_status()
+    except requests.RequestException:
+        _invalidate_session()
+        # Probeer opnieuw met verse sessie
+        resp = _get_session().get(f"{CALIBREWEB_URL}/", timeout=10)
+        resp.raise_for_status()
+
+    return resp.url, resp.text
+
+
 def fetch_shelves() -> List[Dict]:
     """
     Haal openbare boekenplanken op uit Calibre-Web.
@@ -170,21 +191,23 @@ def fetch_shelves() -> List[Dict]:
     if not is_configured():
         return []
 
-    try:
-        session = _get_session()
-        resp = session.get(f"{CALIBREWEB_URL}/", timeout=10)
-        resp.raise_for_status()
-    except ConnectionError:
+    url, html = _fetch_home()
+
+    # Verlopen sessie: Calibre-Web geeft de loginpagina terug met status 200
+    if _is_login_page(url, html):
         _invalidate_session()
-        # Probeer opnieuw met verse sessie
-        session = _get_session()
-        resp = session.get(f"{CALIBREWEB_URL}/", timeout=10)
-        resp.raise_for_status()
+        url, html = _fetch_home()
+        if _is_login_page(url, html):
+            raise ConnectionError(
+                "Calibre-Web sessie ongeldig - controleer CALIBREWEB_USERNAME/PASSWORD"
+            )
 
-    shelves = _parse_shelves(resp.text)
+    shelves = _parse_shelves(html)
 
-    _shelves_cache = shelves
-    _cache_time = time.time()
+    # Lege uitkomst niet cachen, anders blijft de plankenlijst CACHE_TTL leeg
+    if shelves:
+        _shelves_cache = shelves
+        _cache_time = time.time()
 
     return shelves
 
